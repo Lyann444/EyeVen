@@ -25,7 +25,7 @@ class PolicyEvaluationRun(db.Model):
     blocking_issue_count = db.Column(db.Integer, nullable=False, default=0)
     recoverable_issue_count = db.Column(db.Integer, nullable=False, default=0)
     policy_summary = db.Column(db.Text, nullable=True)
-    risk_flags = db.Column(db.LongText, nullable=True)
+    risk_flags = db.Column(db.Text, nullable=True)
     policy_confidence_score = db.Column(db.Numeric(5, 4), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     completed_at = db.Column(db.DateTime, nullable=True)

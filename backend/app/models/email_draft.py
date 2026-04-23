@@ -17,7 +17,7 @@ class EmailDraft(db.Model):
     draft_type = db.Column(db.Enum("vendor_follow_up"), nullable=False)
     recipient_email = db.Column(db.String(255), nullable=True)
     subject_line = db.Column(db.String(255), nullable=False)
-    body_text = db.Column(db.LongText, nullable=False)
+    body_text = db.Column(db.Text, nullable=False)
     draft_status = db.Column(
         db.Enum("generated", "reviewed", "sent", "discarded"),
         nullable=False,

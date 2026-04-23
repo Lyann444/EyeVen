@@ -1,5 +1,7 @@
 from app.extensions import db
-from app.models import VendorCase, EyeVenFormFieldValue
+from app.models import VendorCase, EyeVenFormFieldValue, UploadedFile
+from app.orchestrators.extraction_orchestrator import ExtractionOrchestrator
+from app.orchestrators.workflow_orchestrator import WorkflowOrchestrator
 
 
 class CaseService:
@@ -65,8 +67,14 @@ class CaseService:
 
     @staticmethod
     def run_workflow(case_id):
-        # TODO: delegate to workflow_orchestrator
-        return {"case_id": case_id, "status": "workflow_not_yet_implemented"}
+        case = VendorCase.query.get_or_404(case_id)
+
+        if case.current_state in ("uploaded", "intake_received"):
+            ExtractionOrchestrator.run(case_id)
+            case = VendorCase.query.get(case_id)
+
+        workflow_result = WorkflowOrchestrator.run(case_id)
+        return workflow_result
 
     @staticmethod
     def rerun_affected_stages(case_id):
@@ -75,8 +83,33 @@ class CaseService:
 
     @staticmethod
     def get_form_alignment(case_id):
-        # TODO: return form field values with alignment status
-        return {"case_id": case_id, "status": "not_yet_implemented"}
+        case = VendorCase.query.get_or_404(case_id)
+        fields = EyeVenFormFieldValue.query.filter_by(vendor_case_id=case_id).all()
+        return {
+            "case_id": case_id,
+            "intake_type": case.intake_type,
+            "fields": [
+                {
+                    "section_name": f.section_name,
+                    "field_name": f.field_name,
+                    "field_label": f.field_label,
+                    "value_text": f.value_text,
+                    "normalized_value_text": f.normalized_value_text,
+                    "value_source": f.value_source,
+                    "status": f.status,
+                    "confidence_score": float(f.confidence_score) if f.confidence_score else None,
+                    "source_excerpt": f.source_excerpt,
+                    "notes": f.notes,
+                }
+                for f in fields
+            ],
+            "completeness": {
+                "total": len(fields),
+                "populated": sum(1 for f in fields if f.value_text),
+                "missing": sum(1 for f in fields if f.status == "missing"),
+                "conflicting": sum(1 for f in fields if f.status == "conflicting"),
+            },
+        }
 
     @staticmethod
     def get_verification(case_id):

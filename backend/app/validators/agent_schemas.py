@@ -1,3 +1,4 @@
+"""
 JSON Schema definitions for validating GLM agent outputs.
 
 Every agent must return structured JSON that passes its corresponding schema

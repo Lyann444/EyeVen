@@ -30,7 +30,7 @@ class VerificationRun(db.Model):
         db.Enum("minor", "moderate", "critical"), nullable=True
     )
     summary = db.Column(db.Text, nullable=True)
-    key_findings = db.Column(db.LongText, nullable=True)
+    key_findings = db.Column(db.Text, nullable=True)
     confidence_score = db.Column(db.Numeric(5, 4), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     completed_at = db.Column(db.DateTime, nullable=True)
