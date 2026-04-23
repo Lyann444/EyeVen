@@ -1,0 +1,145 @@
+import json
+import logging
+import time
+
+import requests
+from flask import current_app
+from jsonschema import ValidationError, validate as jsonschema_validate
+
+logger = logging.getLogger(__name__)
+
+MAX_CONTEXT_CHARS = 30000
+MAX_RETRIES = 1
+RETRY_DELAY_SECONDS = 2
+REQUEST_TIMEOUT_SECONDS = 120
+
+
+class GlmServiceError(Exception):
+    pass
+
+
+class GlmMalformedOutputError(GlmServiceError):
+    pass
+
+
+class GlmSchemaValidationError(GlmServiceError):
+    pass
+
+
+class GlmApiError(GlmServiceError):
+    pass
+
+
+class GlmService:
+    @staticmethod
+    def call_glm(
+        prompt: str,
+        system_message: str | None = None,
+        temperature: float = 0.1,
+        max_tokens: int = 4096,
+        response_schema: dict | None = None,
+        retry_on_failure: bool = True,
+    ) -> dict:
+        if len(prompt) > MAX_CONTEXT_CHARS:
+            logger.warning(
+                "Prompt exceeds %d chars (%d), truncating",
+                MAX_CONTEXT_CHARS, len(prompt),
+            )
+            prompt = prompt[:MAX_CONTEXT_CHARS]
+
+        default_system = (
+            "You are a structured data extraction and reasoning engine for an enterprise "
+            "vendor onboarding platform. You must always return valid JSON matching the "
+            "schema provided. Never invent vendor facts. Mark unknown values explicitly. "
+            "Distinguish between missing, conflicting, unverifiable, and low_confidence."
+        )
+        system_msg = system_message or default_system
+
+        payload = {
+            "model": current_app.config["GLM_MODEL"],
+            "messages": [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+
+        if response_schema:
+            payload["response_format"] = {"type": "json_object"}
+
+        result = GlmService._make_request(payload, retry_on_failure)
+
+        parsed = GlmService._parse_json_response(result)
+
+        if response_schema:
+            GlmService._validate_schema(parsed, response_schema)
+
+        return parsed
+
+    @staticmethod
+    def _make_request(payload: dict, retry: bool) -> str:
+        url = current_app.config["GLM_API_URL"]
+        api_key = current_app.config["GLM_API_KEY"]
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        }
+
+        attempts = 2 if retry else 1
+        last_error = None
+
+        for attempt in range(attempts):
+            try:
+                resp = requests.post(
+                    url, json=payload, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                content = data["choices"][0]["message"]["content"]
+                logger.info("GLM response received (attempt %d)", attempt + 1)
+                return content
+            except requests.exceptions.HTTPError as e:
+                last_error = GlmApiError(f"GLM API HTTP error: {e}")
+                logger.error("GLM API HTTP error (attempt %d): %s", attempt + 1, e)
+            except requests.exceptions.Timeout as e:
+                last_error = GlmApiError(f"GLM API timeout: {e}")
+                logger.error("GLM API timeout (attempt %d): %s", attempt + 1, e)
+            except (KeyError, IndexError) as e:
+                last_error = GlmMalformedOutputError(f"GLM response missing expected fields: {e}")
+                logger.error("GLM response structure error (attempt %d): %s", attempt + 1, e)
+            except json.JSONDecodeError as e:
+                last_error = GlmMalformedOutputError(f"GLM response not valid JSON: {e}")
+                logger.error("GLM JSON decode error (attempt %d): %s", attempt + 1, e)
+
+            if attempt < attempts - 1:
+                logger.info("Retrying GLM call in %ds", RETRY_DELAY_SECONDS)
+                time.sleep(RETRY_DELAY_SECONDS)
+
+        raise last_error or GlmApiError("GLM API call failed")
+
+    @staticmethod
+    def _parse_json_response(raw: str) -> dict:
+        text = raw.strip()
+        if text.startswith("```json"):
+            text = text[len("```json"):]
+        if text.startswith("```"):
+            text = text[len("```"):]
+        if text.endswith("```"):
+            text = text[:-len("```")]
+        text = text.strip()
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as e:
+            raise GlmMalformedOutputError(f"Could not parse GLM output as JSON: {e}") from e
+
+    @staticmethod
+    def _validate_schema(data: dict, schema: dict) -> None:
+        try:
+            jsonschema_validate(instance=data, schema=schema)
+        except ValidationError as e:
+            raise GlmSchemaValidationError(
+                f"GLM output failed schema validation: {e.message}"
+            ) from e
