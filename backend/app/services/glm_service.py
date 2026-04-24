@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 MAX_CONTEXT_CHARS = 30000
 MAX_RETRIES = 1
 RETRY_DELAY_SECONDS = 2
-REQUEST_TIMEOUT_SECONDS = 120
+REQUEST_TIMEOUT_SECONDS = 300
 
 
 class GlmServiceError(Exception):
@@ -97,7 +97,22 @@ class GlmService:
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                content = data["choices"][0]["message"]["content"]
+                logger.info("Raw GLM response: %s", json.dumps(data)[:1000])
+
+                choice = data.get("choices", [{}])[0]
+                message = choice.get("message", {})
+                content = message.get("content")
+
+                if content is None:
+                    # Some OpenAI-compatible providers may return tool_calls, reasoning_content,
+                    # or other fields instead of message.content.
+                    content = message.get("reasoning_content") or choice.get("text")
+
+                if not content:
+                    raise GlmMalformedOutputError(
+                        f"GLM response content is empty or null. Raw response: {json.dumps(data)[:1000]}"
+                    )
+
                 logger.info("GLM response received (attempt %d)", attempt + 1)
                 return content
             except requests.exceptions.HTTPError as e:
@@ -121,6 +136,9 @@ class GlmService:
 
     @staticmethod
     def _parse_json_response(raw: str) -> dict:
+        if not raw:
+            raise GlmMalformedOutputError("GLM returned empty response content")
+
         text = raw.strip()
         if text.startswith("```json"):
             text = text[len("```json"):]
