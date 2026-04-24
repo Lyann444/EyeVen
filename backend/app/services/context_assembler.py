@@ -8,6 +8,8 @@ from app.models import (
     PolicyEvaluationRun,
     RoutingDecision,
 )
+from app.services.internal_registry_service import InternalRegistryService
+from app.services.external_verification_service import ExternalVerificationService
 
 
 class ContextAssembler:
@@ -103,8 +105,8 @@ class ContextAssembler:
         return {
             "form_fields": form_fields,
             "alignment_report": alignment_report,
-            "internal_registry": "No internal registry match performed yet",
-            "external_verification": "No external verification performed yet",
+            "internal_registry": json.dumps(InternalRegistryService.match_vendor(case_id), indent=2),
+            "external_verification": json.dumps(ExternalVerificationService.verify_identifiers(case_id), indent=2),
         }
 
     @staticmethod

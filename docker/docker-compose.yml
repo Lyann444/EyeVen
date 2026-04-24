@@ -1,0 +1,45 @@
+version: "3.8"
+
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: eyeven
+      MYSQL_USER: eyeven
+      MYSQL_PASSWORD: eyeven_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ../database/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ../database/seed_form_fields.sql:/docker-entrypoint-initdb.d/02_seed.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    environment:
+      FLASK_ENV: development
+      DATABASE_URL: mysql+pymysql://eyeven:eyeven_password@db:3306/eyeven
+      GLM_API_KEY: ${GLM_API_KEY:-your-glm-api-key-here}
+      GLM_API_URL: https://open.bigmodel.cn/api/paas/v4/chat/completions
+      GLM_MODEL: glm-4
+      UPLOAD_FOLDER: /app/uploads
+    ports:
+      - "5000:5000"
+    volumes:
+      - ../backend:/app
+      - upload_data:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  mysql_data:
+  upload_data:

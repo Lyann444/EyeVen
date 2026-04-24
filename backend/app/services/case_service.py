@@ -1,7 +1,11 @@
 from app.extensions import db
-from app.models import VendorCase, EyeVenFormFieldValue, UploadedFile
+from app.models import (
+    VendorCase, EyeVenFormFieldValue, UploadedFile,
+    VerificationRun, PolicyEvaluationRun, RoutingDecision, EmailDraft,
+)
 from app.orchestrators.extraction_orchestrator import ExtractionOrchestrator
 from app.orchestrators.workflow_orchestrator import WorkflowOrchestrator
+from app.orchestrators.reprocessing_orchestrator import ReprocessingOrchestrator
 
 
 class CaseService:
@@ -78,8 +82,7 @@ class CaseService:
 
     @staticmethod
     def rerun_affected_stages(case_id):
-        # TODO: delegate to reprocessing_orchestrator
-        return {"case_id": case_id, "status": "reprocessing_not_yet_implemented"}
+        return ReprocessingOrchestrator.run(case_id)
 
     @staticmethod
     def get_form_alignment(case_id):
@@ -113,19 +116,62 @@ class CaseService:
 
     @staticmethod
     def get_verification(case_id):
-        return {"case_id": case_id, "status": "not_yet_implemented"}
+        latest = VerificationRun.query.filter_by(
+            vendor_case_id=case_id
+        ).order_by(VerificationRun.created_at.desc()).first()
+        if not latest:
+            return {"case_id": case_id, "status": "no_verification_run_yet"}
+        return {
+            "case_id": case_id,
+            "run_id": latest.id,
+            "legitimacy_status": latest.legitimacy_status,
+            "mismatch_severity": latest.mismatch_severity,
+            "summary": latest.summary,
+            "key_findings": latest.key_findings,
+            "confidence_score": float(latest.confidence_score) if latest.confidence_score else None,
+            "created_at": latest.created_at.isoformat() if latest.created_at else None,
+        }
 
     @staticmethod
     def get_policy(case_id):
-        return {"case_id": case_id, "status": "not_yet_implemented"}
+        latest = PolicyEvaluationRun.query.filter_by(
+            vendor_case_id=case_id
+        ).order_by(PolicyEvaluationRun.created_at.desc()).first()
+        if not latest:
+            return {"case_id": case_id, "status": "no_policy_run_yet"}
+        return {
+            "case_id": case_id,
+            "run_id": latest.id,
+            "risk_band": latest.risk_band,
+            "blocking_issue_count": latest.blocking_issue_count,
+            "recoverable_issue_count": latest.recoverable_issue_count,
+            "policy_summary": latest.policy_summary,
+            "risk_flags": latest.risk_flags,
+            "policy_confidence_score": float(latest.policy_confidence_score) if latest.policy_confidence_score else None,
+            "created_at": latest.created_at.isoformat() if latest.created_at else None,
+        }
 
     @staticmethod
     def get_routing(case_id):
-        return {"case_id": case_id, "status": "not_yet_implemented"}
+        latest = RoutingDecision.query.filter_by(
+            vendor_case_id=case_id
+        ).order_by(RoutingDecision.created_at.desc()).first()
+        if not latest:
+            return {"case_id": case_id, "status": "no_routing_decision_yet"}
+        return {
+            "case_id": case_id,
+            "decision_id": latest.id,
+            "decision_code": latest.decision_code,
+            "recommended_procurement_action": latest.recommended_procurement_action,
+            "decision_reasoning_summary": latest.decision_reasoning_summary,
+            "confidence_score": float(latest.confidence_score) if latest.confidence_score else None,
+            "created_at": latest.created_at.isoformat() if latest.created_at else None,
+        }
 
     @staticmethod
     def create_follow_up(case_id):
-        return {"case_id": case_id, "status": "not_yet_implemented"}
+        result = WorkflowOrchestrator._run_follow_up(case_id)
+        return result
 
     @staticmethod
     def _seed_form_fields(case_id):
