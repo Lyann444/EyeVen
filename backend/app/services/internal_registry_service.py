@@ -37,8 +37,8 @@ class InternalRegistryService:
 
         if not submitted_ssm and not submitted_name and not submitted_reg_no:
             return {
-                "match_status": "no_match",
-                "reason": "No identifying fields available to match against registry",
+                "match_status": "missing_data",
+                "reason": "No identifying fields available to check internal registry.",
                 "matched_record": None,
                 "field_comparisons": [],
             }
@@ -93,8 +93,8 @@ class InternalRegistryService:
 
         if not db_records:
             return {
-                "match_status": "no_match",
-                "reason": "No matching record found in internal vendor registry",
+                "match_status": "new_vendor", # Changed from no_match
+                "reason": "This is a NEW vendor registration. No prior records exist in the internal registry. You MUST rely strictly on the external verification results to determine legitimacy.",
                 "matched_vendor_number": None,
                 "match_score": 0,
                 "registry_record": None,

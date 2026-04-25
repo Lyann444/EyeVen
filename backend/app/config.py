@@ -30,17 +30,9 @@ class Config:
 
     PADDLEOCR_LANG = os.getenv("PADDLEOCR_LANG", "en")
 
-    # External verification APIs
-    SSM_EINFO_BASE_URL = os.getenv("SSM_EINFO_BASE_URL", "https://www.ssm-einfo.my/api")
-    SSM_EINFO_API_KEY = os.getenv("SSM_EINFO_API_KEY", "")
-
-    SST_INQUIRY_BASE_URL = os.getenv("SST_INQUIRY_BASE_URL", "https://sst01.customs.gov.my/api")
-    SST_INQUIRY_API_KEY = os.getenv("SST_INQUIRY_API_KEY", "")
-
-    LHDN_TIN_BASE_URL = os.getenv("LHDN_TIN_BASE_URL", "https://mytax.hasil.gov.my/api")
-    LHDN_TIN_API_KEY = os.getenv("LHDN_TIN_API_KEY", "")
-
-    EXTERNAL_API_TIMEOUT = int(os.getenv("EXTERNAL_API_TIMEOUT", "15"))
+    # SST portal scraping (no public API — uses Selenium headless Chrome)
+    SST_PORTAL_URL = os.getenv("SST_PORTAL_URL", "https://sst01.customs.gov.my/account/inquiry")
+    SCRAPE_TIMEOUT_SECONDS = int(os.getenv("SCRAPE_TIMEOUT_SECONDS", "15"))
 
 
 class DevelopmentConfig(Config):

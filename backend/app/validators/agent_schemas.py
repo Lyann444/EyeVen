@@ -255,7 +255,7 @@ VERIFICATION_SCHEMA = {
         },
         "internal_registry_match_status": {
             "type": ["string", "null"],
-            "enum": ["matched", "mismatched", "no_match", None],
+            "enum": ["matched", "mismatched", "no_match","new_vendor", "rejected_high_risk_history", None],
         },
         "external_verification_status": {
             "type": ["string", "null"],
@@ -296,7 +296,7 @@ POLICY_EVALUATION_SCHEMA = {
                     "flag_type": {"type": "string"},
                     "description": {"type": "string"},
                     "field_name": {"type": ["string", "null"]},
-                    "severity": {"type": "string", "enum": ["informational", "warning", "blocking"]},
+                    "severity": {"type": "string", "enum": ["informational", "warning", "blocking", "recoverable"]},
                 },
                 "required": ["flag_type", "description", "severity"],
             },

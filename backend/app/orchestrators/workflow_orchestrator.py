@@ -10,6 +10,7 @@ from app.models import (
     PolicyEvaluationRun,
     RoutingDecision,
     EmailDraft,
+    VendorRegistry
 )
 from app.services.form_service import FormService
 from app.services.glm_service import GlmService, GlmServiceError
@@ -55,12 +56,14 @@ class WorkflowOrchestrator:
             results["verification"] = ver_result
             case = VendorCase.query.get(case_id)
 
-        if case.current_state in ("verification_in_progress",):
+        # 2. Trigger Policy Evaluation (Waiting for Verification to finish)
+        if case.current_state in ("policy_review_in_progress",):
             policy_result = WorkflowOrchestrator._run_policy_evaluation(case_id)
             results["policy_evaluation"] = policy_result
             case = VendorCase.query.get(case_id)
 
-        if case.current_state in ("policy_review_in_progress",):
+        # 3. Trigger Routing (Waiting for Policy Evaluation to finish)
+        if case.current_state in ("routing_in_progress",):
             routing_result = WorkflowOrchestrator._run_routing(case_id)
             results["routing"] = routing_result
             case = VendorCase.query.get(case_id)
@@ -161,7 +164,8 @@ class WorkflowOrchestrator:
 
         case.latest_policy_status = glm_result.get("risk_band")
         case.risk_band = glm_result.get("risk_band")
-        case.current_state = "policy_review_in_progress"
+        
+        case.current_state = "routing_in_progress"
         db.session.commit()
 
         return {
@@ -220,6 +224,55 @@ class WorkflowOrchestrator:
         }
         case.current_state = state_map.get(decision_code, "manual_review_required")
         db.session.commit()
+
+        # =========================================================
+        # HACKATHON: AUTO-SAVE NEW VENDORS TO INTERNAL REGISTRY
+        # =========================================================
+        if decision_code in ("complete_verified", "rejected", "flagged_high_risk"):
+            import random
+            
+            # 1. Grab all extracted fields from the form
+            fields = EyeVenFormFieldValue.query.filter_by(vendor_case_id=case_id).all()
+            field_map = {f.field_name: f.value_text or "" for f in fields}
+
+            ssm_number = field_map.get("ssm_roc_rob_number", "").strip()
+            company_name = field_map.get("company_registered_name", "").strip()
+
+            # 2. Proceed only if we have minimum identifying data
+            if ssm_number or company_name:
+                
+                # Check if they somehow already exist to prevent database crashes
+                existing_vendor = None
+                if ssm_number:
+                    existing_vendor = VendorRegistry.query.filter_by(ssm_roc_rob_number=ssm_number).first()
+                elif company_name:
+                    existing_vendor = VendorRegistry.query.filter_by(company_registered_name=company_name).first()
+
+                # 3. If they are a new vendor, save them for future checks
+                if not existing_vendor:
+                    # 'complete_verified' = 0 risk. Everything else = 1 risk.
+                    is_high_risk = 0 if decision_code == "complete_verified" else 1
+                    reason = glm_result.get("decision_reasoning_summary") if is_high_risk else ""
+                    
+                    # Generate a random V-number for the hackathon demo
+                    new_vendor_id = f"V-3{random.randint(100, 999)}"
+
+                    new_vendor = VendorRegistry(
+                        vendor_number=new_vendor_id,
+                        ssm_roc_rob_number=ssm_number,
+                        company_registered_name=company_name,
+                        company_registered_number=field_map.get("company_registered_number", ""),
+                        tax_sst_gst_number=field_map.get("tax_sst_gst_number", ""),
+                        company_email=field_map.get("company_email", ""),
+                        contact_person_name=field_map.get("contact_person_name", ""),
+                        business_type=field_map.get("business_type", ""),
+                        is_past_high_risk=is_high_risk,
+                        high_risk_reason=reason
+                    )
+                    db.session.add(new_vendor)
+                    db.session.commit()
+                    logger.info(f"Auto-saved new vendor {company_name} to internal registry. High Risk: {bool(is_high_risk)}")
+        # =========================================================
 
         return {
             "decision_code": decision_code,
