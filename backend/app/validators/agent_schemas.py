@@ -256,7 +256,7 @@ VERIFICATION_SCHEMA = {
         },
         "internal_registry_match_status": {
             "type": ["string", "null"],
-            "enum": ["matched", "mismatched", "no_match","new_vendor", None],
+            "enum": ["matched", "mismatched", "no_match","new_vendor", "rejected_high_risk_history", None],
         },
         "external_verification_status": {
             "type": ["string", "null"],

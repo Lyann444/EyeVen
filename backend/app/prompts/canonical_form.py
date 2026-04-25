@@ -125,27 +125,6 @@ For these fields, document_sources must include every page/document value found,
 
 For non-critical fields, document_sources may be empty.
 
-CHECKBOX / TICK BOX RULE:
-
-For checkbox fields, infer the selected option only if the mark is visible in or near the box.
-
-Treat these as selected:
-[x], [X], [✓], [✔], [/], [■], [●]
-
-Treat these as not selected:
-[ ], [  ], empty checkbox
-
-For fields such as:
-- registration_type
-- business_type
-- latest_annual_revenue_range
-- iso_certification_available
-- legal_disputes_past_5_years
-- outsource_any_part_of_services
-
-If no option is visibly selected, set extracted_value = null and status = "missing" or "unverifiable".
-Never guess checkbox values.
-
 STRICT COMPANY NAME DOCUMENT SOURCES RULE:
 
 For company_registered_name, document_sources MUST include every company identity candidate found across all pages/documents.
@@ -214,6 +193,14 @@ Example:
 "Registration Number: 201901045678 (1355008-X)"
 
 These are MATCHING evidence, not conflict.
+
+COMPARISON RULES:
+- You must use STRICT, exact string matching for all digital identifiers, including `company_website`, `company_email`, and `contact_email`.
+- Do NOT "fuzzy match" or forgive domain differences. If the form website (e.g., www.sun.com.my) differs in any way from the evidence website (e.g., www.apexoffice.com.my), the status MUST be marked as "mismatched_with_evidence".
+- Treat any discrepancy in URLs or domains as a definitive conflict.
+- You must use STRICT, exact string matching for all digital identifiers, including `company_website`, `company_email`, and `contact_email`. Treat any discrepancy in URLs or domains as a definitive conflict.
+- For text fields like `company_registered_name` and `company_registered_address`, you MUST ignore case sensitivity, spacing differences, and minor punctuation variations (e.g., "Sdn.Bhd." is equal to "SDN. BHD.", "Sdn Bhd", or "SDN BHD").
+- If the core entity name is identical and only differs by these minor stylistic formatting choices, mark the status as "matched_with_evidence".
 
 CONFIDENCE RULES:
 - Fields extracted directly from a submitted form: confidence >= 0.85
