@@ -99,6 +99,13 @@ FALLBACK BEHAVIOR:
 DOCUMENT SOURCES REQUIREMENT:
 For each field, you MUST also list document_sources — an array of every document that contributed a value for this field, with the value extracted from that specific document. This is critical for deterministic cross-document checking. Even if multiple documents agree on a value, list each document separately. If a field appears in only one document, list that one document. If a field does not appear in any document, leave the array empty.
 
+- Treat "Company Registration No.", "Company Registration Number", "Registration Number", "SSM Registration Number", "SSM No.", "ROC No.", and "ROB No." as valid evidence for ssm_roc_rob_number.
+- If a document contains a Malaysian company registration number in the format "201901045678 (1355008-X)", populate BOTH:
+  1. company_registered_number
+  2. ssm_roc_rob_number
+- Do not leave ssm_roc_rob_number missing if company_registered_number contains the Malaysian SSM/ROC/ROB identifier.
+- The old-format identifier inside brackets, e.g. "1355008-X", is also part of the SSM/ROC/ROB number.
+
 INTAKE CLASSIFICATION:
 {intake_classification}
 

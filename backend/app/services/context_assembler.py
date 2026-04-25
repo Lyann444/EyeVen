@@ -108,8 +108,53 @@ class ContextAssembler:
 
         cross_doc_report = CrossDocumentConsistencyService.check_consistency(case_id)
 
+        # Check if any identity fields are conflicting across documents
+        identity_fields = {"company_registered_name", "ssm_roc_rob_number", "company_registered_number"}
+        has_identity_conflict = any(
+            fr["field_name"] in identity_fields and fr["verdict"] == "severe"
+            for fr in cross_doc_report.get("field_results", [])
+        )
+
+        conflicting_fields = [
+            fv for fv in fields
+            if fv.status in ("conflicting", "mismatched_with_evidence")
+        ]
+
         registry_result = InternalRegistryService.match_vendor(case_id)
-        external_result = ExternalVerificationService.verify_identifiers(case_id)
+
+        # Only skip external verification if registry matches AND no identity
+        # conflicts exist across documents. If documents disagree on the
+        # company name/registration, a registry match on one value does not
+        # mean the vendor is verified — the conflicting value must be
+        # resolved first.
+        if (
+            registry_result.get("match_status") == "matched"
+            and not has_identity_conflict
+            and not conflicting_fields
+        ):
+            external_result = {
+                "overall_status": "verified",
+                "checks": {},
+                "skipped_reason": "Vendor matched in internal registry; external verification not required",
+            }
+        else:
+            external_result = ExternalVerificationService.verify_identifiers(case_id)
+            if registry_result.get("match_status") == "matched" and (has_identity_conflict or conflicting_fields):
+                # Registry matched on one value but documents disagree — flag it
+                conflicting_names = [f.field_name for f in conflicting_fields]
+                severe_fields = [
+                    fr["field_name"] for fr in cross_doc_report.get("field_results", [])
+                    if fr["field_name"] in identity_fields and fr["verdict"] == "severe"
+                ]
+                external_result["registry_conflict_warning"] = {
+                    "registry_matched_as": registry_result.get("matched_vendor_number"),
+                    "identity_conflicts": severe_fields or conflicting_names,
+                    "detail": (
+                        "Internal registry matched, but cross-document consistency "
+                        "found conflicting identity fields. The matched registry entry "
+                        "may correspond to a different vendor than the one in some documents."
+                    ),
+                }
 
         result = {
             "form_fields": form_fields,
