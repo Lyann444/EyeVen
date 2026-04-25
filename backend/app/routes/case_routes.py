@@ -44,3 +44,41 @@ def mark_case_reviewed(case_id):
         return jsonify(result), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 404
+
+@staticmethod
+def get_email_drafts(case_id):
+    drafts = EmailDraft.query.filter_by(
+        vendor_case_id=case_id
+    ).order_by(EmailDraft.created_at.desc()).all()
+    
+    return [
+        {
+            "id": d.id,
+            "recipient_email": d.recipient_email,
+            "subject_line": d.subject_line,
+            "body_text": d.body_text,
+            "created_at": d.created_at.isoformat() if d.created_at else None
+        }
+        for d in drafts
+    ]
+
+@case_bp.route("/<int:case_id>/follow-up", methods=["POST"])
+def generate_follow_up(case_id):
+    try:
+        # This triggers the AI to write the email and save it to the DB
+        result = CaseService.create_follow_up(case_id)
+        if "error" in result:
+            return jsonify(result), 500
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@case_bp.route("/<int:case_id>/email-drafts", methods=["GET"])
+def get_email_drafts(case_id):
+    try:
+        # This fetches the saved emails to show on the UI
+        result = CaseService.get_email_drafts(case_id)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
