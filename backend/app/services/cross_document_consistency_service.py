@@ -93,14 +93,24 @@ def _levenshtein(a, b):
 
 
 def _normalize_name(val):
-    s = val.upper().strip()
-    s = re.sub(r"\s+", " ", s)
-    for suffix in ("SENDIRIAN BERHAD", "SDN. BHD.", "SDN.BHD.", "SDN BHD", "SDN.", "BHD"):
+    s = str(val or "").upper().strip()
+
+    # Normalize Malaysian company suffix formats first
+    s = re.sub(r"\bSDN\s*\.?\s*BHD\s*\.?\b", "SDN BHD", s)
+    s = re.sub(r"\bSENDIRIAN\s+BERHAD\b", "SDN BHD", s)
+    s = re.sub(r"\bBERHAD\b", "BHD", s)
+
+    # Remove punctuation after suffix normalization
+    s = re.sub(r"[^A-Z0-9\s]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+
+    # Remove company suffix for comparison
+    for suffix in ("SDN BHD", "BHD"):
         if s.endswith(suffix):
             s = s[: -len(suffix)].strip()
             break
-    s = s.rstrip(".,")
-    return re.sub(r"\s+", " ", s).strip()
+
+    return s
 
 
 def _normalize_reg_number(val):

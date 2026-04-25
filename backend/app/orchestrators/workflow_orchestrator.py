@@ -95,6 +95,26 @@ class WorkflowOrchestrator:
                 response_schema=VERIFICATION_SCHEMA,
                 max_tokens=4096,
             )
+            blocking_issues = glm_result.get("blocking_issues", []) or []
+            recoverable_issues = glm_result.get("recoverable_issues", []) or []
+
+            glm_result["blocking_issue_count"] = len(blocking_issues)
+            glm_result["recoverable_issue_count"] = len(recoverable_issues)
+            seen_flags = set()
+            deduped_flags = []
+
+            for flag in glm_result.get("risk_flags", []) or []:
+                key = (
+                    flag.get("flag_type"),
+                    flag.get("field_name"),
+                    flag.get("severity"),
+                )
+
+                if key not in seen_flags:
+                    seen_flags.add(key)
+                    deduped_flags.append(flag)
+
+            glm_result["risk_flags"] = deduped_flags
         except GlmServiceError as e:
             logger.error("Verification GLM failed for case %d: %s", case_id, e)
             case.current_state = "manual_review_required"

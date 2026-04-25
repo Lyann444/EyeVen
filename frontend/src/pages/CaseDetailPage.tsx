@@ -103,12 +103,23 @@ const CaseDetailPage: React.FC = () => {
       setRunning(false);
     }
   };
-
+  const flagSeverityColor = (severity?: string) => {
+    switch (severity) {
+      case "blocking":
+        return "error";
+      case "warning":
+        return "warning";
+      case "informational":
+        return "info";
+      default:
+        return "default";
+    }
+  };
   const handleGenerateEmail = async () => {
     if (!caseId) return;
     try {
       // Calls the POST route you just added to the backend to make the AI write the draft
-      await apiClient.post(`/cases/${caseId}/follow-up`);
+      await caseService.createFollowUp(parseInt(caseId));
       // Reload the page to fetch the newly generated draft into the UI
       window.location.reload(); 
     } catch (e) {
@@ -286,7 +297,7 @@ const CaseDetailPage: React.FC = () => {
                         try {
                           const flags = typeof policy.risk_flags === 'string' ? JSON.parse(policy.risk_flags) : policy.risk_flags;
                           return Array.isArray(flags) ? flags.map((f: any, i: number) => (
-                            <Chip key={i} label={f.flag_type || f} size="small" sx={{ mr: 0.5, mb: 0.5 }} color="warning" />
+                            <Chip key={i} label={f.flag_type || f} size="small" sx={{ mr: 0.5, mb: 0.5 }} color={flagSeverityColor(f.severity) as any} />
                           )) : null;
                         } catch { return null; }
                       })()}
@@ -398,6 +409,7 @@ const CaseDetailPage: React.FC = () => {
         )}
 
         {/* Follow-Up Email Panel */}
+        {caseData.current_state === 'pending_follow_up' && (
         <Grid size={12}>
           <Card>
             <CardContent>
@@ -421,8 +433,7 @@ const CaseDetailPage: React.FC = () => {
                     <Typography variant="body2" color="text.secondary" gutterBottom>
                       <strong>Subject:</strong> {e.subject_line}
                     </Typography>
-                    
-                    {/* Displays the actual email body with preserved line breaks */}
+
                     <Paper elevation={0} sx={{ p: 2, my: 2, bgcolor: '#f8f9fa', whiteSpace: 'pre-wrap', fontSize: '0.875rem' }}>
                       {e.body_text}
                     </Paper>
@@ -437,11 +448,14 @@ const CaseDetailPage: React.FC = () => {
                   </Box>
                 ))
               ) : (
-                <Typography color="text.secondary">No follow-up emails generated yet. Click the button above to generate one.</Typography>
+                <Typography color="text.secondary">
+                  No follow-up emails generated yet. Click the button above to generate one.
+                </Typography>
               )}
             </CardContent>
           </Card>
         </Grid>
+        )}
 
         {/* Audit Trail Panel */}
         <Grid size={12}>
