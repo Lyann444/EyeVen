@@ -10,7 +10,7 @@ class ReprocessingRun(db.Model):
         db.BigInteger, db.ForeignKey("vendor_cases.id", ondelete="CASCADE"), nullable=False
     )
     trigger_type = db.Column(
-        db.Enum("corrected_upload", "manual_rerun"), nullable=False
+        db.Enum("corrected_upload", "manual_rerun", "follow_up_upload"), nullable=False
     )
     reason_summary = db.Column(db.Text, nullable=True)
     previous_case_state = db.Column(db.String(100), nullable=False)

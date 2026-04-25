@@ -42,11 +42,30 @@ class FormService:
         if field_name == "iso_certification_expiry_date":
             return " ".join(value.replace(",", "").split())
 
-        return " ".join(
-            value.replace(".", "")
-                .replace(",", "")
-                .split()
-        )
+        # Company / account name normalization
+        name_like_fields = {
+            "company_registered_name",
+            "bank_account_name",
+        }
+
+        if field_name in name_like_fields:
+            value = value.replace("&", "and")
+
+            # Normalize Malaysian company suffixes
+            value = re.sub(r"\bsdn\s*\.?\s*bhd\s*\.?\b", "sdn bhd", value)
+            value = re.sub(r"\bsendirian\s+berhad\b", "sdn bhd", value)
+            value = re.sub(r"\bberhad\b", "bhd", value)
+
+            # Remove punctuation after suffix normalization
+            value = re.sub(r"[^a-z0-9\s]", " ", value)
+            value = re.sub(r"\s+", " ", value).strip()
+
+            return value
+
+        value = value.replace(".", "").replace(",", "")
+        value = re.sub(r"\s+", " ", value).strip()
+
+        return value
 
 
     @staticmethod
@@ -130,15 +149,30 @@ class FormService:
                 continue
 
             # If only supporting docs exist, check whether the supporting docs agree
-            if not form_set and len(support_set) == 1:
-                if field.get("status") == "matched_with_evidence":
-                    field["status"] = "filled_from_supporting_docs"
-                    field["notes"] = "Value was filled from supporting documents only; no procurement form value was found."
-
             if not form_set and len(support_set) > 1:
                 field["status"] = "conflicting"
                 field["confidence"] = min(field.get("confidence") or 0.4, 0.4)
                 field["notes"] = "Supporting documents contain different values for this field."
+
+        # --- ADD THIS NEW BLOCK HERE ---
+        # Handle conditionally required fields (e.g., business_type_other)
+        fields_list = glm_result.get("fields", [])
+        
+        # Find the business type fields
+        biz_type_field = next((f for f in fields_list if f.get("field_name") == "business_type"), None)
+        biz_other_field = next((f for f in fields_list if f.get("field_name") == "business_type_other"), None)
+
+        if biz_type_field and biz_other_field:
+            bt_val = (biz_type_field.get("extracted_value") or "").strip().lower()
+            
+            # If the business type is filled and is NOT "other", the other field is implicitly N/A
+            if bt_val and bt_val != "other" and bt_val not in {"n/a", "none"}:
+                if biz_other_field.get("status") in {"missing", "unverifiable"}:
+                    biz_other_field["status"] = "provided_in_form"
+                    biz_other_field["extracted_value"] = "N/A"
+                    biz_other_field["normalized_value"] = ""
+                    biz_other_field["confidence"] = 1.0
+                    biz_other_field["notes"] = "Field is not applicable based on the selected Business Type."
 
         return glm_result
     @staticmethod

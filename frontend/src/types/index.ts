@@ -10,7 +10,8 @@ export type FieldStatus =
   | 'conflicting'
   | 'unverifiable'
   | 'low_confidence'
-  | 'declaration_missing';
+  | 'declaration_missing'
+  | 'not_applicable';
 export type ValueSource =
   | 'procurement_form'
   | 'supporting_document'
@@ -69,7 +70,7 @@ export interface UploadedFile {
   vendor_case_id: number;
   original_filename: string;
   file_type: string;
-  source_category: 'procurement_form' | 'supporting_document' | 'zip_bundle' | 'corrected_upload';
+  source_category: 'procurement_form' | 'supporting_document' | 'zip_bundle' | 'corrected_upload' | 'follow_up_upload';
   upload_status: string;
   uploaded_at: string;
 }
@@ -123,7 +124,7 @@ export interface EmailDraft {
 export interface ReprocessingRun {
   id: number;
   vendor_case_id: number;
-  trigger_type: 'corrected_upload' | 'manual_rerun';
+  trigger_type: 'corrected_upload' | 'manual_rerun' | 'follow_up_upload';
   reason_summary: string | null;
   previous_case_state: string;
   new_case_state: string | null;

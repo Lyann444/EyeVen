@@ -65,3 +65,14 @@ def create_follow_up(case_id):
         return jsonify(result), 201
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@workflow_bp.route("/<int:case_id>/follow-up/reprocess", methods=["POST"])
+def reprocess_follow_up(case_id):
+    try:
+        result = CaseService.reprocess_follow_up(case_id)
+        if isinstance(result, tuple):
+            return jsonify(result[0]), result[1]
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500

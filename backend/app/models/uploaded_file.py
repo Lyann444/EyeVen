@@ -21,7 +21,8 @@ class UploadedFile(db.Model):
     file_size_bytes = db.Column(db.BigInteger, nullable=False)
     source_category = db.Column(
         db.Enum(
-            "procurement_form", "supporting_document", "zip_bundle", "corrected_upload"
+            "procurement_form", "supporting_document", "zip_bundle", "corrected_upload",
+            "follow_up_upload",
         ),
         nullable=False,
     )

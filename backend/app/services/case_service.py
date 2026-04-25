@@ -174,6 +174,13 @@ class CaseService:
         return result
 
     @staticmethod
+    def reprocess_follow_up(case_id):
+        case = VendorCase.query.get_or_404(case_id)
+        if case.current_state != "pending_follow_up":
+            return {"error": "Case must be in pending_follow_up state to reprocess follow-up"}, 400
+        return ReprocessingOrchestrator.run(case_id, trigger_type="follow_up_upload")
+
+    @staticmethod
     def _seed_form_fields(case_id):
         CANONICAL_FIELDS = [
             ("registration_type", "registration_type", "Registration Type"),

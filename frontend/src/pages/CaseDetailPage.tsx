@@ -1,12 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Card, CardContent, Grid, Chip, Table, TableBody,
   TableCell, TableContainer, TableHead, TableRow, Paper, Button,
   Divider, CircularProgress, Accordion, AccordionSummary, AccordionDetails,
+  TextField,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
+import ReplayIcon from '@mui/icons-material/Replay';
 import apiClient from '../services/apiClient';
 import { caseService } from '../services/caseService';
 import { auditService } from '../services/auditService';
@@ -20,6 +23,7 @@ const statusColor = (s: string) => {
     case 'filled_from_supporting_docs': return 'info';
     case 'low_confidence': return 'warning';
     case 'unverifiable': return 'error';
+    case 'not_applicable': return 'default';
     default: return 'default';
   }
 };
@@ -47,6 +51,11 @@ const CaseDetailPage: React.FC = () => {
   const [audit, setAudit] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [followUpFiles, setFollowUpFiles] = useState<File[]>([]);
+  const [followUpReason, setFollowUpReason] = useState('');
+  const [reprocessing, setReprocessing] = useState(false);
+  const [reprocessError, setReprocessError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -95,11 +104,29 @@ const CaseDetailPage: React.FC = () => {
     }
   };
 
+  const handleFollowUpUpload = async () => {
+    if (!caseId || followUpFiles.length === 0) return;
+    setReprocessing(true);
+    setReprocessError(null);
+    try {
+      await caseService.uploadFollowUpFiles(parseInt(caseId), followUpFiles, followUpReason || undefined);
+      await caseService.reprocessFollowUp(parseInt(caseId));
+      window.location.reload();
+    } catch (e: any) {
+      const msg = e?.response?.data?.error || e?.message || 'Follow-up reprocessing failed';
+      console.error('Follow-up reprocessing failed', e);
+      setReprocessError(msg);
+    } finally {
+      setReprocessing(false);
+    }
+  };
+
   if (loading) return <CircularProgress />;
   if (!caseData) return <Typography>Case not found</Typography>;
 
-  const populated = formFields.filter(f => f.value_text).length;
+  const populated = formFields.filter(f => f.value_text && f.status !== 'not_applicable').length;
   const missing = formFields.filter(f => f.status === 'missing').length;
+  const notApplicable = formFields.filter(f => f.status === 'not_applicable').length;
   const issues = formFields.filter(f =>
     ['conflicting', 'mismatched_with_evidence', 'unverifiable', 'low_confidence'].includes(f.status)
   ).length;
@@ -139,6 +166,7 @@ const CaseDetailPage: React.FC = () => {
                 <Chip label={`${populated} Populated`} color="success" size="small" />
                 <Chip label={`${missing} Missing`} color="default" size="small" />
                 <Chip label={`${issues} Issues`} color="error" size="small" />
+                {notApplicable > 0 && <Chip label={`${notApplicable} N/A`} color="default" size="small" variant="outlined" />}
                 <Typography variant="body2" color="text.secondary">
                   Intake: {caseData.intake_type === 'procurement_form_present' ? 'Form Present' : 'Form Absent'}
                 </Typography>
@@ -281,6 +309,70 @@ const CaseDetailPage: React.FC = () => {
             </CardContent>
           </Card>
         </Grid>
+
+        {/* Follow-Up Reprocessing Panel — only shown when case is pending_follow_up */}
+        {caseData.current_state === 'pending_follow_up' && (
+          <Grid size={12}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>Follow-Up Reprocessing</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  This case requires additional information. Upload the missing documents and reprocess the case.
+                </Typography>
+
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Button
+                      variant="outlined"
+                      startIcon={<UploadFileIcon />}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      Choose Files
+                    </Button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      hidden
+                      onChange={(e) => {
+                        const fileList = e.target.files;
+                        if (fileList) setFollowUpFiles(Array.from(fileList));
+                      }}
+                    />
+                    {followUpFiles.length > 0 && (
+                      <Typography variant="body2">
+                        {followUpFiles.length} file(s) selected: {followUpFiles.map(f => f.name).join(', ')}
+                      </Typography>
+                    )}
+                  </Box>
+
+                  <TextField
+                    label="Reason Summary (optional)"
+                    placeholder="e.g. Vendor supplied missing SSM certificate"
+                    size="small"
+                    fullWidth
+                    value={followUpReason}
+                    onChange={(e) => setFollowUpReason(e.target.value)}
+                  />
+
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Button
+                      variant="contained"
+                      startIcon={<ReplayIcon />}
+                      onClick={handleFollowUpUpload}
+                      disabled={reprocessing || followUpFiles.length === 0}
+                    >
+                      {reprocessing ? 'Reprocessing...' : 'Upload & Reprocess'}
+                    </Button>
+                    {reprocessError && (
+                      <Typography color="error" variant="body2">{reprocessError}</Typography>
+                    )}
+                  </Box>
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
 
         {/* Follow-Up Email Panel */}
         <Grid size={12}>

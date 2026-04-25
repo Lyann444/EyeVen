@@ -83,6 +83,39 @@ class FileService:
         }
 
     @staticmethod
+    def upload_follow_up_files(case_id, files, reason_summary=None):
+        case = VendorCase.query.get_or_404(case_id)
+
+        if case.current_state != "pending_follow_up":
+            return {"error": "Case is not in pending_follow_up state"}, 400
+
+        if not files:
+            return {"error": "No files provided"}, 400
+
+        upload_dir = FileService._get_upload_dir(case_id)
+        os.makedirs(upload_dir, exist_ok=True)
+
+        uploaded = []
+        for f in files:
+            result = FileService._process_single_file(f, case_id, upload_dir, "follow_up_upload")
+            if result:
+                uploaded.append(result)
+
+        if not uploaded:
+            return {"error": "No valid files were uploaded"}, 400
+
+        case.current_state = "reprocessing"
+        db.session.commit()
+
+        return {
+            "case_id": case_id,
+            "uploaded_files": uploaded,
+            "previous_state": "pending_follow_up",
+            "current_state": case.current_state,
+            "reason_summary": reason_summary,
+        }
+
+    @staticmethod
     def _process_single_file(file_storage, case_id, upload_dir, source_category):
         filename = secure_filename(file_storage.filename or "unnamed")
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""

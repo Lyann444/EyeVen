@@ -31,3 +31,18 @@ def upload_corrected_files(case_id):
         return jsonify(result), 201
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@upload_bp.route("/<int:case_id>/follow-up", methods=["POST"])
+def upload_follow_up_files(case_id):
+    files = request.files.getlist("files")
+    reason_summary = request.form.get("reason_summary")
+    if not files:
+        return jsonify({"error": "No files provided"}), 400
+    try:
+        result = FileService.upload_follow_up_files(case_id, files, reason_summary)
+        if isinstance(result, tuple):
+            return jsonify(result[0]), result[1]
+        return jsonify(result), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
