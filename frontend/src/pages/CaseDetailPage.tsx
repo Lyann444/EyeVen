@@ -95,6 +95,29 @@ const CaseDetailPage: React.FC = () => {
     }
   };
 
+  const handleGenerateEmail = async () => {
+    if (!caseId) return;
+    try {
+      // Calls the POST route you just added to the backend to make the AI write the draft
+      await apiClient.post(`/cases/${caseId}/follow-up`);
+      // Reload the page to fetch the newly generated draft into the UI
+      window.location.reload(); 
+    } catch (e) {
+      console.error("Failed to generate email", e);
+      alert("Failed to generate email. Check the console for errors.");
+    }
+  };
+
+  const handleOpenOutlook = (recipientEmail: string, subjectLine: string, bodyText: string) => {
+    // encodeURIComponent ensures spaces and line-breaks format perfectly in Outlook
+    const subject = encodeURIComponent(subjectLine || "");
+    const body = encodeURIComponent(bodyText || "");
+    const recipient = recipientEmail || "";
+    
+    // Natively opens the default email client (Outlook)
+    window.location.href = `mailto:${recipient}?subject=${subject}&body=${body}`;
+  };
+
   if (loading) return <CircularProgress />;
   if (!caseData) return <Typography>Case not found</Typography>;
 
@@ -286,21 +309,43 @@ const CaseDetailPage: React.FC = () => {
         <Grid size={12}>
           <Card>
             <CardContent>
-              <Typography variant="h6" gutterBottom>Follow-Up Communication</Typography>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                <Typography variant="h6">Follow-Up Communication</Typography>
+                <Button 
+                  variant="outlined" 
+                  color="primary" 
+                  onClick={handleGenerateEmail}
+                >
+                  Draft Follow-up Email
+                </Button>
+              </Box>
+
               {audit?.email_drafts?.length > 0 ? (
                 audit.email_drafts.map((e: any) => (
-                  <Box key={e.id} sx={{ mb: 2 }}>
-                    <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
-                      <Chip label={e.draft_status} size="small" />
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>{e.subject_line}</Typography>
-                    </Box>
-                    <Button size="small" variant="outlined" onClick={() => navigate(`/cases/${caseId}`)}>
-                      View Full Email Draft
+                  <Box key={e.id} sx={{ mb: 3, p: 2, border: '1px solid #e0e0e0', borderRadius: 2 }}>
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
+                      <strong>To:</strong> {e.recipient_email || "[Vendor Email]"}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
+                      <strong>Subject:</strong> {e.subject_line}
+                    </Typography>
+                    
+                    {/* Displays the actual email body with preserved line breaks */}
+                    <Paper elevation={0} sx={{ p: 2, my: 2, bgcolor: '#f8f9fa', whiteSpace: 'pre-wrap', fontSize: '0.875rem' }}>
+                      {e.body_text}
+                    </Paper>
+
+                    <Button 
+                      variant="contained" 
+                      color="primary"
+                      onClick={() => handleOpenOutlook(e.recipient_email, e.subject_line, e.body_text)}
+                    >
+                      Send in Outlook
                     </Button>
                   </Box>
                 ))
               ) : (
-                <Typography color="text.secondary">No follow-up emails generated yet.</Typography>
+                <Typography color="text.secondary">No follow-up emails generated yet. Click the button above to generate one.</Typography>
               )}
             </CardContent>
           </Card>
