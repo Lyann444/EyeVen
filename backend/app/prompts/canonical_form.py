@@ -227,6 +227,10 @@ For each field, you MUST also list document_sources — an array of every docume
   2. ssm_roc_rob_number
 - Do not leave ssm_roc_rob_number missing if company_registered_number contains the Malaysian SSM/ROC/ROB identifier.
 - The old-format identifier inside brackets, e.g. "1355008-X", is also part of the SSM/ROC/ROB number.
+For missing, not_applicable, unverifiable, or unsupported fields:
+- evidence_reference may be null
+- document_sources must be [] if no evidence exists
+- do not fabricate evidence_reference
 
 INTAKE CLASSIFICATION:
 {intake_classification}

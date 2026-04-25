@@ -162,7 +162,7 @@ class FormService:
 
             # Build document_values from GLM document_sources
             doc_vals = {}
-            for ds in field_data.get("document_sources", []):
+            for ds in (field_data.get("document_sources") or []):
                 doc_id = ds.get("source_document_id")
                 page = ds.get("page")
                 value = ds.get("extracted_value")

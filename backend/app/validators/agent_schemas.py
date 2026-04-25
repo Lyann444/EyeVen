@@ -30,11 +30,11 @@ VALUE_SOURCE_ENUM = [
 ]
 
 EVIDENCE_REFERENCE = {
-    "type": "object",
+    "type": ["object", "null"],
     "properties": {
         "source_document_id": {"type": ["integer", "null"]},
         "source_excerpt": {"type": ["string", "null"]},
-        "source_type": {"type": "string"},
+        "source_type": {"type": ["string", "null"]},
     },
     "required": ["source_document_id", "source_excerpt", "source_type"],
 }
@@ -89,17 +89,17 @@ FORM_FIELD_ITEM = {
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         "evidence_reference": EVIDENCE_REFERENCE,
         "document_sources": {
-            "type": "array",
+            "type": ["array", "null"],
             "items": {
                 "type": "object",
                 "properties": {
                     "source_document_id": {"type": ["integer", "null"]},
                     "page": {"type": ["integer", "null"]},
                     "extracted_value": {"type": ["string", "null"]},
-                    "source_type": {"type": "string"},
+                    "source_type": {"type": ["string", "null"]},
                     "source_excerpt": {"type": ["string", "null"]},
                 },
-                "required": ["source_document_id","extracted_value", "source_type"],
+                "required": ["source_document_id", "extracted_value", "source_type"],
             },
         },
         "notes": {"type": ["string", "null"]},
