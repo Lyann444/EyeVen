@@ -64,6 +64,14 @@ Return a JSON object:
   "recommended_next_step": "<string>"
 }}
 
+FORBIDDEN BEHAVIOR:
+- Do not stop comparing after finding the first mismatch. You MUST check and report conflicts for every single field.
+- Never fabricate values for missing fields
+- Never treat unsupported values as valid
+- Never mark a field as matched_with_evidence without actual evidence
+- Never silently fill a field with guessed information
+- Unresolved fields MUST remain explicitly missing, conflicting, unverifiable, or low_confidence
+
 CONFIDENCE RULES:
 - If all critical fields are consistent and verifiable: confidence >= 0.85
 - If minor mismatches exist but case is recoverable: confidence 0.6-0.8

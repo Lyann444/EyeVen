@@ -297,7 +297,7 @@ POLICY_EVALUATION_SCHEMA = {
                     "flag_type": {"type": "string"},
                     "description": {"type": "string"},
                     "field_name": {"type": ["string", "null"]},
-                    "severity": {"type": "string", "enum": ["informational", "warning", "blocking"]},
+                    "severity": {"type": "string", "enum": ["informational", "warning", "blocking", "recoverable"]},
                 },
                 "required": ["flag_type", "description", "severity"],
             },

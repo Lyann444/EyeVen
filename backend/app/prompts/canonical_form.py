@@ -88,6 +88,14 @@ Return a JSON object:
   "confidence": <float 0-1>
 }}
 
+FORBIDDEN BEHAVIOR:
+- Do not stop comparing after finding the first mismatch. You MUST check and report conflicts for every single field.
+- Never fabricate values for missing fields
+- Never treat unsupported values as valid
+- Never mark a field as matched_with_evidence without actual evidence
+- Never silently fill a field with guessed information
+- Unresolved fields MUST remain explicitly missing, conflicting, unverifiable, or low_confidence
+
 Registration Type must be extracted as a single text value.
 
 Valid normalized values:
@@ -274,7 +282,20 @@ OR company identity is seriously inconsistent across documents (e.g. company nam
 - For company_registered_name, company_registered_number, ssm_roc_rob_number, bank_account_number, and tax_sst_gst_number, mismatches are critical.
 - Do not mark a field as matched_with_evidence using only the procurement_form value.
 - If only procurement_form value exists and no supporting evidence exists, set status = provided_in_form or unverifiable, not matched_with_evidence.
+STRICT MATCHED WITH EVIDENCE RULE:
 
+A field may only use status = "matched_with_evidence" when:
+1. A value is found in the procurement_form; and
+2. At least one value is found in supporting_document; and
+3. All normalized values are aligned.
+
+Do not use matched_with_evidence when the value only appears in the procurement_form.
+Do not use matched_with_evidence when the value only appears in supporting_document.
+Do not use matched_with_evidence when any supporting document has a different value.
+
+If procurement_form and supporting_document values differ, use mismatched_with_evidence.
+If multiple supporting documents disagree with each other, use conflicting.
+For company identity fields, mismatches should be treated as conflicting.
 INTAKE CLASSIFICATION:
 {intake_classification}
 
