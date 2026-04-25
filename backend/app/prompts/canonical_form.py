@@ -198,9 +198,10 @@ COMPARISON RULES:
 - You must use STRICT, exact string matching for all digital identifiers, including `company_website`, `company_email`, and `contact_email`.
 - Do NOT "fuzzy match" or forgive domain differences. If the form website (e.g., www.sun.com.my) differs in any way from the evidence website (e.g., www.apexoffice.com.my), the status MUST be marked as "mismatched_with_evidence".
 - Treat any discrepancy in URLs or domains as a definitive conflict.
+COMPARISON RULES:
 - You must use STRICT, exact string matching for all digital identifiers, including `company_website`, `company_email`, and `contact_email`. Treat any discrepancy in URLs or domains as a definitive conflict.
 - For text fields like `company_registered_name` and `company_registered_address`, you MUST ignore case sensitivity, spacing differences, and minor punctuation variations (e.g., "Sdn.Bhd." is equal to "SDN. BHD.", "Sdn Bhd", or "SDN BHD").
-- If the core entity name is identical and only differs by these minor stylistic formatting choices, mark the status as "matched_with_evidence".
+
 
 CONFIDENCE RULES:
 - Fields extracted directly from a submitted form: confidence >= 0.85
