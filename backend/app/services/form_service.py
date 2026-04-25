@@ -133,7 +133,21 @@ class FormService:
 
         if ext in ("pdf", "png", "jpg", "jpeg", "tiff", "bmp"):
             ocr_result = OcrService.run_ocr(file_path)
-            return ocr_result.get("full_text", "")
+
+            blocks_by_page = {}
+            for block in ocr_result.get("text_blocks", []):
+                page = block.get("page", 1)
+                text = block.get("text", "").strip()
+                if text:
+                    blocks_by_page.setdefault(page, []).append(text)
+
+            page_texts = []
+            for page in sorted(blocks_by_page.keys()):
+                page_texts.append(
+                    f"[PAGE {page}]\n" + "\n".join(blocks_by_page[page])
+                )
+
+            return "\n\n".join(page_texts)
 
         return None
 
@@ -146,15 +160,32 @@ class FormService:
             if not field_name:
                 continue
 
-            # Build document_values from document_sources
+            # Build document_values from GLM document_sources
             doc_vals = {}
             for ds in field_data.get("document_sources", []):
                 doc_id = ds.get("source_document_id")
-                if doc_id is not None and ds.get("extracted_value") is not None:
-                    doc_vals[str(doc_id)] = ds["extracted_value"]
+                page = ds.get("page")
+                value = ds.get("extracted_value")
+
+                if doc_id is not None and value:
+                    if page is not None:
+                        key = f"file_{doc_id}_page_{page}"
+                    else:
+                        key = f"file_{doc_id}"
+
+                    doc_vals[key] = value
+
+            evidence = field_data.get("evidence_reference") or {}
+
+            # Fallback if GLM does not return document_sources
+            if not doc_vals and evidence.get("source_document_id") and field_data.get("extracted_value"):
+                doc_vals = {
+                    f"file_{evidence['source_document_id']}": field_data["extracted_value"]
+                }
 
             existing = EyeVenFormFieldValue.query.filter_by(
-                vendor_case_id=case_id, field_name=field_name
+                vendor_case_id=case_id,
+                field_name=field_name
             ).first()
 
             if existing:
@@ -164,22 +195,11 @@ class FormService:
                 existing.status = field_data.get("status", "missing")
                 existing.confidence_score = field_data.get("confidence")
                 existing.notes = field_data.get("notes")
+                existing.source_file_id = evidence.get("source_document_id")
+                existing.source_excerpt = evidence.get("source_excerpt")
+                existing.document_values = doc_vals if doc_vals else None
 
-                evidence = field_data.get("evidence_reference")
-                if evidence:
-                    existing.source_file_id = evidence.get("source_document_id")
-                    existing.source_excerpt = evidence.get("source_excerpt")
-
-                if doc_vals:
-                    existing.document_values = doc_vals
-                elif existing.source_file_id and existing.value_text and not existing.document_values:
-                    existing.document_values = {str(existing.source_file_id): existing.value_text}
             else:
-                evidence = field_data.get("evidence_reference") or {}
-                # Fallback: if no document_sources, build from evidence_reference
-                if not doc_vals and evidence.get("source_document_id") and field_data.get("extracted_value"):
-                    doc_vals = {str(evidence["source_document_id"]): field_data["extracted_value"]}
-
                 existing = EyeVenFormFieldValue(
                     vendor_case_id=case_id,
                     section_name=field_data.get("section_name", "unknown"),

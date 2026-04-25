@@ -114,7 +114,7 @@ class ContextAssembler:
             fr["field_name"] in identity_fields and fr["verdict"] == "severe"
             for fr in cross_doc_report.get("field_results", [])
         )
-
+        
         conflicting_fields = [
             fv for fv in fields
             if fv.status in ("conflicting", "mismatched_with_evidence")
@@ -163,6 +163,7 @@ class ContextAssembler:
             "internal_registry": json.dumps(registry_result, indent=2),
             "external_verification": json.dumps(external_result, indent=2),
         }
+        
 
         # Surface blocking flags for downstream Policy/Routing agents
         if registry_result.get("match_status") == "rejected_high_risk_history":

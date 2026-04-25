@@ -44,12 +44,14 @@ Return a JSON object:
         "source_type": "<string>"
       }},
       "document_sources": [
-        {{
-          "source_document_id": <integer or null>,
-          "extracted_value": "<string or null>",
-          "source_type": "<string>"
-        }}
-      ],
+    {{
+      "source_document_id": <integer or null>,
+      "page": <integer or null>,
+      "extracted_value": "<string or null>",
+      "source_type": "<string>",
+      "source_excerpt": "<string or null>"
+    }}
+  ],
       "notes": "<string or null>"
     }}
   ],
@@ -77,6 +79,59 @@ Return a JSON object:
   "recommended_next_step": "<string>",
   "confidence": <float 0-1>
 }}
+
+SPECIAL RULE FOR company_registered_name:
+For company_registered_name, extract every company identity name found in each page/document, not only values labelled "Company Name".
+
+Treat the following as company name evidence:
+1. Company profile title/header, e.g. "Sunway Berhad SDN. BHD."
+2. Labels such as "Company Name", "Registered Name", "Vendor Name"
+3. Certificate holder name after phrases such as:
+   - "This is to certify that"
+   - "This certifies that"
+   - "has been incorporated"
+   - "has been assessed and found to comply"
+4. Bank account owner / account name if it belongs to the vendor
+5. Company name used as the subject in business nature / declaration sentences
+
+For multi-page PDFs, preserve page-level values in document_sources.
+Do not overwrite conflicting values.
+If different pages/documents contain different company names, set status = "conflicting" and confidence <= 0.4.
+
+SPECIAL RULE FOR MALAYSIAN COMPANY REGISTRATION / SSM IDENTIFIERS:
+
+Treat the following labels as referring to the same company registration identifier:
+- Company Registration No.
+- Company Registration Number
+- Registration Number
+- SSM Registration Number
+- SSM No.
+- ROC No.
+- ROB No.
+
+For Malaysian companies, these values usually refer to the same SSM/ROC/ROB registration identity.
+
+If a document contains a Malaysian registration number such as:
+201901045678 (1355008-X)
+
+Then populate BOTH:
+1. company_registered_number
+2. ssm_roc_rob_number
+
+Do not mark company_registered_number and ssm_roc_rob_number as conflicting if they contain the same registration identifier under different labels.
+
+When comparing across documents, normalize by removing:
+- label wording
+- extra spaces
+- punctuation differences
+- uppercase/lowercase differences
+
+Example:
+"Company Registration No.: 201901045678 (1355008-X)"
+"SSM Registration Number: 201901045678 (1355008-X)"
+"Registration Number: 201901045678 (1355008-X)"
+
+These are MATCHING evidence, not conflict.
 
 CONFIDENCE RULES:
 - Fields extracted directly from a submitted form: confidence >= 0.85

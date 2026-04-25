@@ -93,10 +93,12 @@ FORM_FIELD_ITEM = {
                 "type": "object",
                 "properties": {
                     "source_document_id": {"type": ["integer", "null"]},
+                    "page": {"type": ["integer", "null"]},
                     "extracted_value": {"type": ["string", "null"]},
                     "source_type": {"type": "string"},
+                    "source_excerpt": {"type": ["string", "null"]},
                 },
-                "required": ["source_document_id", "extracted_value"],
+                "required": ["source_document_id","extracted_value", "source_type"],
             },
         },
         "notes": {"type": ["string", "null"]},
