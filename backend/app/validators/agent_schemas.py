@@ -87,6 +87,18 @@ FORM_FIELD_ITEM = {
         "status": {"type": "string", "enum": FIELD_STATUS_ENUM},
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         "evidence_reference": EVIDENCE_REFERENCE,
+        "document_sources": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "source_document_id": {"type": ["integer", "null"]},
+                    "extracted_value": {"type": ["string", "null"]},
+                    "source_type": {"type": "string"},
+                },
+                "required": ["source_document_id", "extracted_value"],
+            },
+        },
         "notes": {"type": ["string", "null"]},
     },
     "required": [

@@ -43,6 +43,13 @@ Return a JSON object:
         "source_excerpt": "<string or null>",
         "source_type": "<string>"
       }},
+      "document_sources": [
+        {{
+          "source_document_id": <integer or null>,
+          "extracted_value": "<string or null>",
+          "source_type": "<string>"
+        }}
+      ],
       "notes": "<string or null>"
     }}
   ],
@@ -88,6 +95,9 @@ FORBIDDEN BEHAVIOR:
 FALLBACK BEHAVIOR:
 - If document text is unreadable or empty, mark affected fields as "unverifiable"
 - If evidence is ambiguous, mark as "low_confidence" rather than guessing
+
+DOCUMENT SOURCES REQUIREMENT:
+For each field, you MUST also list document_sources — an array of every document that contributed a value for this field, with the value extracted from that specific document. This is critical for deterministic cross-document checking. Even if multiple documents agree on a value, list each document separately. If a field appears in only one document, list that one document. If a field does not appear in any document, leave the array empty.
 
 INTAKE CLASSIFICATION:
 {intake_classification}

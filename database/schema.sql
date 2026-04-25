@@ -90,6 +90,7 @@ CREATE TABLE eyeven_form_field_values (
     confidence_score        DECIMAL(5,4) NULL,
     source_file_id          BIGINT      NULL,
     source_excerpt          TEXT        NULL,
+    document_values         JSON        NULL,
     notes                   TEXT        NULL,
     updated_at              DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 

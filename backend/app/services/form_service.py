@@ -146,6 +146,13 @@ class FormService:
             if not field_name:
                 continue
 
+            # Build document_values from document_sources
+            doc_vals = {}
+            for ds in field_data.get("document_sources", []):
+                doc_id = ds.get("source_document_id")
+                if doc_id is not None and ds.get("extracted_value") is not None:
+                    doc_vals[str(doc_id)] = ds["extracted_value"]
+
             existing = EyeVenFormFieldValue.query.filter_by(
                 vendor_case_id=case_id, field_name=field_name
             ).first()
@@ -162,8 +169,17 @@ class FormService:
                 if evidence:
                     existing.source_file_id = evidence.get("source_document_id")
                     existing.source_excerpt = evidence.get("source_excerpt")
+
+                if doc_vals:
+                    existing.document_values = doc_vals
+                elif existing.source_file_id and existing.value_text and not existing.document_values:
+                    existing.document_values = {str(existing.source_file_id): existing.value_text}
             else:
                 evidence = field_data.get("evidence_reference") or {}
+                # Fallback: if no document_sources, build from evidence_reference
+                if not doc_vals and evidence.get("source_document_id") and field_data.get("extracted_value"):
+                    doc_vals = {str(evidence["source_document_id"]): field_data["extracted_value"]}
+
                 existing = EyeVenFormFieldValue(
                     vendor_case_id=case_id,
                     section_name=field_data.get("section_name", "unknown"),
@@ -176,6 +192,7 @@ class FormService:
                     confidence_score=field_data.get("confidence"),
                     source_file_id=evidence.get("source_document_id"),
                     source_excerpt=evidence.get("source_excerpt"),
+                    document_values=doc_vals if doc_vals else None,
                     notes=field_data.get("notes"),
                 )
                 db.session.add(existing)

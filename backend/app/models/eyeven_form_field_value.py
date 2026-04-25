@@ -44,6 +44,7 @@ class EyeVenFormFieldValue(db.Model):
         nullable=True,
     )
     source_excerpt = db.Column(db.Text, nullable=True)
+    document_values = db.Column(db.JSON, nullable=True)
     notes = db.Column(db.Text, nullable=True)
     updated_at = db.Column(
         db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow

@@ -10,6 +10,7 @@ from app.models import (
 )
 from app.services.internal_registry_service import InternalRegistryService
 from app.services.external_verification_service import ExternalVerificationService
+from app.services.cross_document_consistency_service import CrossDocumentConsistencyService
 
 
 class ContextAssembler:
@@ -76,6 +77,9 @@ class ContextAssembler:
     def verification(case_id: int) -> dict:
         fields = EyeVenFormFieldValue.query.filter_by(vendor_case_id=case_id).all()
 
+        CrossDocumentConsistencyService.update_field_statuses(case_id)
+        fields = EyeVenFormFieldValue.query.filter_by(vendor_case_id=case_id).all()
+
         form_fields = json.dumps([
             {
                 "field_name": fv.field_name,
@@ -102,9 +106,12 @@ class ContextAssembler:
             ],
         }, indent=2)
 
+        cross_doc_report = CrossDocumentConsistencyService.check_consistency(case_id)
+
         return {
             "form_fields": form_fields,
             "alignment_report": alignment_report,
+            "cross_document_consistency_report": json.dumps(cross_doc_report, indent=2),
             "internal_registry": json.dumps(InternalRegistryService.match_vendor(case_id), indent=2),
             "external_verification": json.dumps(ExternalVerificationService.verify_identifiers(case_id), indent=2),
         }
