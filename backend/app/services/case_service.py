@@ -193,7 +193,6 @@ class CaseService:
             ("company_general", "main_office_phone_number", "Main Office Phone Number"),
             ("company_general", "year_of_establishment", "Year of Establishment"),
             ("company_general", "business_type", "Business Type"),
-            ("company_general", "business_type_other", "Business Type (Other)"),
             ("primary_contact", "contact_person_name", "Contact Person Name"),
             ("primary_contact", "designation", "Designation"),
             ("primary_contact", "contact_email", "Contact Email"),

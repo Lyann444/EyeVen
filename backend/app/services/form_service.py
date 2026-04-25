@@ -70,109 +70,42 @@ class FormService:
 
     @staticmethod
     def _enforce_evidence_alignment(glm_result):
-        critical_fields = {
-            "company_registered_name",
-            "company_registered_number",
-            "ssm_roc_rob_number",
-            "tax_sst_gst_number",
-            "company_email",
-            "contact_email",
-            "contact_person_name",
-            "bank_account_name",
-            "bank_account_number",
-            "iso_certification_number",
-            "iso_certification_expiry_date",
-        }
-
+        # 1. Company Identity fields get the "conflicting" status (highest severity)
         company_identity_fields = {
             "company_registered_name",
             "company_registered_number",
             "ssm_roc_rob_number",
         }
 
+        # 2. Extract the mismatches array from the LLM's alignment report
+        alignment_report = glm_result.get("field_alignment_report") or {}
+        mismatches = alignment_report.get("mismatches") or []
+        
+        # Create a dictionary for fast lookup of mismatched fields
+        mismatched_field_names = {m.get("field_name"): m for m in mismatches}
+
+        # 3. Enforce the status on the main fields array based on the mismatch report
         for field in glm_result.get("fields", []):
             field_name = field.get("field_name")
-
-            if field_name not in critical_fields:
-                continue
-
-            sources = field.get("document_sources") or []
-
-            form_values = []
-            support_values = []
-
-            for src in sources:
-                source_type = (src.get("source_type") or "").lower()
-                value = src.get("extracted_value")
-
-                if not value:
-                    continue
-
-                normalized = FormService._normalize_for_alignment(field_name, value)
-
-                if not normalized:
-                    continue
-
-                if "procurement_form" in source_type:
-                    form_values.append(normalized)
-                else:
-                    support_values.append(normalized)
-
-            form_set = set(form_values)
-            support_set = set(support_values)
-            all_values = form_set | support_set
-
-            # Cannot be "matched with evidence" if there is no supporting evidence
-            if form_set and not support_set:
-                if field.get("status") == "matched_with_evidence":
-                    field["status"] = "provided_in_form"
-                    field["notes"] = "Value was found in the procurement form, but no supporting evidence was found."
-                continue
-
-            # If form and supporting docs exist, they must align
-            if form_set and support_set:
-                if form_set == support_set:
-                    field["status"] = "matched_with_evidence"
-                    field["confidence"] = max(field.get("confidence") or 0.0, 0.85)
-                else:
-                    if field_name in company_identity_fields:
-                        field["status"] = "conflicting"
-                        field["confidence"] = min(field.get("confidence") or 0.4, 0.4)
-                        field["notes"] = "Procurement form identity value does not align with supporting document evidence."
-                        if field_name == "company_registered_name":
-                            field["extracted_value"] = "CONFLICTING_VALUES"
-                            field["normalized_value"] = None
-                    else:
-                        field["status"] = "mismatched_with_evidence"
-                        field["confidence"] = min(field.get("confidence") or 0.6, 0.6)
-                        field["notes"] = "Procurement form value does not align with supporting document evidence."
-                continue
-
-            # If only supporting docs exist, check whether the supporting docs agree
-            if not form_set and len(support_set) > 1:
-                field["status"] = "conflicting"
-                field["confidence"] = min(field.get("confidence") or 0.4, 0.4)
-                field["notes"] = "Supporting documents contain different values for this field."
-
-        # --- ADD THIS NEW BLOCK HERE ---
-        # Handle conditionally required fields (e.g., business_type_other)
-        fields_list = glm_result.get("fields", [])
-        
-        # Find the business type fields
-        biz_type_field = next((f for f in fields_list if f.get("field_name") == "business_type"), None)
-        biz_other_field = next((f for f in fields_list if f.get("field_name") == "business_type_other"), None)
-
-        if biz_type_field and biz_other_field:
-            bt_val = (biz_type_field.get("extracted_value") or "").strip().lower()
             
-            # If the business type is filled and is NOT "other", the other field is implicitly N/A
-            if bt_val and bt_val != "other" and bt_val not in {"n/a", "none"}:
-                if biz_other_field.get("status") in {"missing", "unverifiable"}:
-                    biz_other_field["status"] = "provided_in_form"
-                    biz_other_field["extracted_value"] = "N/A"
-                    biz_other_field["normalized_value"] = ""
-                    biz_other_field["confidence"] = 1.0
-                    biz_other_field["notes"] = "Field is not applicable based on the selected Business Type."
+            if field_name in mismatched_field_names:
+                mismatch_data = mismatched_field_names[field_name]
+                
+                # If the LLM detected a mismatch, force the field's status to reflect it
+                if field_name in company_identity_fields:
+                    field["status"] = "conflicting"
+                    field["confidence"] = 0.4
+                    field["notes"] = f"Conflict: Form value '{mismatch_data.get('form_value')}' vs Evidence '{mismatch_data.get('evidence_value')}'."
+                    
+                    # Optional: Wipe the extracted value so the frontend shows it as unresolved
+                    if field_name == "company_registered_name":
+                        field["extracted_value"] = "CONFLICTING_VALUES"
+                        field["normalized_value"] = None
+                else:
+                    # For all other fields (like company_website), mark as mismatched
+                    field["status"] = "mismatched_with_evidence"
+                    field["confidence"] = 0.6
+                    field["notes"] = f"Mismatch: Form value '{mismatch_data.get('form_value')}' vs Evidence '{mismatch_data.get('evidence_value')}'."
 
         return glm_result
     @staticmethod

@@ -283,6 +283,14 @@ class WorkflowOrchestrator:
 
     @staticmethod
     def _run_follow_up(case_id):
+        case = VendorCase.query.get(case_id)
+        if case.current_state in ("completed", "rejected", "flagged_high_risk"):
+            logger.info("Skipping follow-up for case %d as it is in terminal state: %s", case_id, case.current_state)
+            return {
+                "status": "skipped", 
+                "message": f"Follow-up is not required for cases in '{case.current_state}' state."
+            }
+        # --- END GUARD CLAUSE ---
         context = ContextAssembler.follow_up(case_id)
         prompt = FOLLOW_UP_PROMPT.format(**context)
 

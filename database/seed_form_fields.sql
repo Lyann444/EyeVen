@@ -99,7 +99,6 @@ BEGIN
         (p_vendor_case_id, 'company_general', 'main_office_phone_number',   'Main Office Phone Number',   'unknown', 'missing'),
         (p_vendor_case_id, 'company_general', 'year_of_establishment',      'Year of Establishment',      'unknown', 'missing'),
         (p_vendor_case_id, 'company_general', 'business_type',              'Business Type',              'unknown', 'missing'),
-        (p_vendor_case_id, 'company_general', 'business_type_other',        'Business Type (Other)',      'unknown', 'missing');
 
     -- Section B. Primary Contact Person
     INSERT INTO eyeven_form_field_values (vendor_case_id, section_name, field_name, field_label, value_source, status) VALUES

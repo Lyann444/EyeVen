@@ -15,7 +15,7 @@ ALLOWED INPUT CONTEXT:
 - Evidence conflicts that require clarification
 - Vendor identity and contact data if available
 
-FOLLOW-UP EMAIL REQUIREMENTS:
+FOLLOW_UP_EMAIL REQUIREMENTS:
 - Be professional and concise
 - Clearly state what is needed
 - Group requests logically by form section
@@ -23,6 +23,8 @@ FOLLOW-UP EMAIL REQUIREMENTS:
 - Explain that the submission is incomplete or requires clarification
 - Be editable by the Procurement Officer before sending
 - Use a professional tone
+- YOU MUST GENERATE THE ACTUAL EMAIL CONTENT in the `body_text` field. It cannot be empty.
+- The `body_text` must contain the full message: a formal greeting, the exact list of missing/conflicting items, and a professional sign-off.
 
 OUTPUT SCHEMA:
 Return a JSON object:

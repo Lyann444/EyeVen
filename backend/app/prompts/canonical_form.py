@@ -23,7 +23,7 @@ Do not use vague source_type values for critical comparison fields.
 
 CANONICAL EYEVEN FORM SCHEMA:
 Registration Type: registration_type, current_vendor_number
-Section A. Company General Information: company_registered_name, company_registered_number, company_registered_address, company_website, company_email, main_office_phone_number, year_of_establishment, business_type, business_type_other
+Section A. Company General Information: company_registered_name, company_registered_number, company_registered_address, company_website, company_email, main_office_phone_number, year_of_establishment, business_type
 Section B. Primary Contact Person: contact_person_name, designation, contact_email, contact_mobile_number
 Section C. Financial / Payment Information: bank_name, bank_account_name, bank_account_number, latest_annual_revenue_range
 Section D. Registration / Certification: ssm_roc_rob_number, tax_sst_gst_number, iso_certification_available, iso_certification_number, iso_certification_expiry_date
