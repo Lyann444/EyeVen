@@ -31,7 +31,7 @@ class FormService:
             glm_result = GlmService.call_glm(
                 prompt=prompt,
                 response_schema=CANONICAL_FORM_SCHEMA,
-                max_tokens=4096,
+                max_tokens=16384,
                 temperature=0.1,
             )
         except (GlmServiceError, GlmSchemaValidationError) as e:

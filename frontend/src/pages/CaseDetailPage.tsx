@@ -76,14 +76,20 @@ const CaseDetailPage: React.FC = () => {
     load();
   }, [caseId]);
 
+  const [runError, setRunError] = useState<string | null>(null);
+
   const runWorkflow = async () => {
     if (!caseId) return;
     setRunning(true);
+    setRunError(null);
     try {
-      await caseService.runWorkflow(parseInt(caseId));
+      const res = await caseService.runWorkflow(parseInt(caseId));
+      console.log('Workflow result:', res.data);
       window.location.reload();
-    } catch (e) {
+    } catch (e: any) {
+      const msg = e?.response?.data?.error || e?.message || 'Workflow run failed';
       console.error('Workflow run failed', e);
+      setRunError(msg);
     } finally {
       setRunning(false);
     }
@@ -117,6 +123,7 @@ const CaseDetailPage: React.FC = () => {
           <Button variant="contained" startIcon={<PlayArrowIcon />} onClick={runWorkflow} disabled={running}>
             {running ? 'Running...' : 'Run Workflow'}
           </Button>
+          {runError && <Typography color="error" variant="body2" sx={{ ml: 1 }}>{runError}</Typography>}
         </Box>
       </Box>
 

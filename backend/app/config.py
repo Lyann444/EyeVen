@@ -17,9 +17,12 @@ class Config:
         "pool_recycle": 3600,
     }
 
-    GLM_API_URL = os.getenv("GLM_API_URL", "https://open.bigmodel.cn/api/paas/v4/chat/completions")
-    GLM_API_KEY = os.getenv("GLM_API_KEY", "")
-    GLM_MODEL = os.getenv("GLM_MODEL", "glm-4")
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+    GLM_API_KEY = os.getenv("GLM_API_KEY", os.getenv("OPENAI_API_KEY", ""))
+    GLM_API_URL = os.getenv("GLM_API_URL", "https://api.openai.com/v1/chat/completions")
+    GLM_MODEL = os.getenv("GLM_MODEL", os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
 
     MAX_UPLOAD_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50"))
     MAX_ZIP_FILES = int(os.getenv("MAX_ZIP_FILES", "20"))

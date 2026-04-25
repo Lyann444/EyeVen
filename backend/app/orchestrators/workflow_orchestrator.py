@@ -40,7 +40,11 @@ class WorkflowOrchestrator:
         results = {}
 
         if case.current_state in ("intake_classified", "procurement_form_detected", "procurement_form_missing",
-                                   "intake_received", "uploaded", "extracting"):
+                                   "intake_received", "uploaded", "extracting", "verification_blocked"):
+            # Reset blocked state so form structuring can retry
+            if case.current_state == "verification_blocked":
+                case.current_state = "intake_classified"
+                db.session.commit()
             form_result = FormService.structure_form(case_id)
             results["form_structuring"] = form_result
             case = VendorCase.query.get(case_id)

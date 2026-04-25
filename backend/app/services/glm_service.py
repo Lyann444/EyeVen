@@ -73,6 +73,7 @@ class GlmService:
         parsed = GlmService._parse_json_response(result)
 
         if response_schema:
+            GlmService._coerce_null_strings(parsed, response_schema)
             GlmService._validate_schema(parsed, response_schema)
 
         return parsed
@@ -150,8 +151,129 @@ class GlmService:
 
         try:
             return json.loads(text)
-        except json.JSONDecodeError as e:
-            raise GlmMalformedOutputError(f"Could not parse GLM output as JSON: {e}") from e
+        except json.JSONDecodeError:
+            repaired = GlmService._repair_truncated_json(text)
+            if repaired is not None:
+                return repaired
+            raise GlmMalformedOutputError(
+                f"Could not parse GLM output as JSON (also failed truncated repair). "
+                f"First 200 chars: {text[:200]}"
+            )
+
+    @staticmethod
+    def _repair_truncated_json(text: str) -> dict | None:
+        """Try to salvage a valid JSON object from a truncated response."""
+        # Find the outermost object
+        start = text.find("{")
+        if start == -1:
+            return None
+
+        depth = 0
+        in_string = False
+        escape_next = False
+        end = -1
+
+        for i in range(start, len(text)):
+            c = text[i]
+            if escape_next:
+                escape_next = False
+                continue
+            if c == "\\":
+                escape_next = True
+                continue
+            if c == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+
+        if end != -1:
+            try:
+                return json.loads(text[start:end + 1])
+            except json.JSONDecodeError:
+                pass
+
+        # No closing brace found — truncate to last complete value and close up
+        # Close any open strings, arrays, objects
+        suffix = ""
+        if in_string:
+            suffix += '"'
+        # Count unclosed brackets
+        depth = 0
+        in_string = False
+        escape_next = False
+        for i in range(start, len(text)):
+            c = text[i]
+            if escape_next:
+                escape_next = False
+                continue
+            if c == "\\":
+                escape_next = True
+                continue
+            if c == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if c in ("{", "["):
+                depth += 1
+            elif c in ("}", "]"):
+                depth -= 1
+
+        # Remove trailing incomplete key-value (e.g. "notes": "some unfinis)
+        truncated = text[start:]
+        # Find the last complete key-value pair before the truncation point
+        last_comma = truncated.rfind(",")
+        last_colon = truncated.rfind(":")
+        # If colon appears after last comma, we're mid-value — cut back to last comma
+        if last_colon > last_comma and last_comma > 0:
+            truncated = truncated[:last_comma]
+
+        suffix += "}" * max(depth, 0)
+
+        try:
+            return json.loads(truncated + suffix)
+        except json.JSONDecodeError:
+            return None
+
+    @staticmethod
+    def _coerce_null_strings(data, schema) -> None:
+        """Replace null values with empty string where schema requires a string type."""
+        if not isinstance(data, dict) or not isinstance(schema, dict):
+            return
+
+        props = schema.get("properties", {})
+        for key, prop_schema in props.items():
+            if key not in data:
+                continue
+
+            value = data[key]
+            if value is None:
+                allowed = prop_schema.get("type", [])
+                if isinstance(allowed, str):
+                    allowed = [allowed]
+                if "string" in allowed and "null" not in allowed:
+                    data[key] = ""
+                    continue
+
+            # Recurse into nested objects
+            if isinstance(value, dict) and isinstance(prop_schema, dict):
+                GlmService._coerce_null_strings(value, prop_schema)
+
+            # Recurse into array items
+            if isinstance(value, list) and isinstance(prop_schema, dict):
+                item_schema = prop_schema.get("items")
+                if item_schema and isinstance(item_schema, dict):
+                    for item in value:
+                        if isinstance(item, dict):
+                            GlmService._coerce_null_strings(item, item_schema)
 
     @staticmethod
     def _validate_schema(data: dict, schema: dict) -> None:

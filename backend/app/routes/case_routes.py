@@ -1,3 +1,4 @@
+from sqlalchemy.exc import IntegrityError
 from flask import Blueprint, request, jsonify
 from app.services.case_service import CaseService
 
@@ -12,8 +13,10 @@ def create_case():
     try:
         result = CaseService.create_case(data)
         return jsonify(result), 201
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except IntegrityError:
+        return jsonify({"error": "Case reference already exists"}), 409
+    except Exception:
+        return jsonify({"error": "Failed to create case"}), 500
 
 
 @case_bp.route("", methods=["GET"])

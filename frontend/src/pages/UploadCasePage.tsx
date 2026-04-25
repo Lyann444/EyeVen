@@ -11,23 +11,29 @@ const UploadCasePage: React.FC = () => {
   const navigate = useNavigate();
   const [files, setFiles] = useState<FileList | null>(null);
   const [emailContent, setEmailContent] = useState('');
-  const [caseReference, setCaseReference] = useState('');
   const [vendorName, setVendorName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  const handleSubmit = async () => {
-    if (!caseReference.trim()) {
-      setError('Case reference is required');
-      return;
-    }
+  const generateCaseReference = () => {
+    const now = new Date();
+    const ts = now.getFullYear().toString() +
+      (now.getMonth() + 1).toString().padStart(2, '0') +
+      now.getDate().toString().padStart(2, '0') + '-' +
+      now.getHours().toString().padStart(2, '0') +
+      now.getMinutes().toString().padStart(2, '0') +
+      now.getSeconds().toString().padStart(2, '0');
+    return `VC-${ts}`;
+  };
 
+  const handleSubmit = async () => {
     setLoading(true);
     setError('');
     setSuccess('');
 
     try {
+      const caseReference = generateCaseReference();
       const createRes = await caseService.createCase({
         case_reference: caseReference,
         vendor_display_name: vendorName || null,
@@ -49,10 +55,15 @@ const UploadCasePage: React.FC = () => {
         });
       }
 
-      setSuccess(`Case ${caseReference} created successfully`);
+      setSuccess(`Case created successfully`);
       setTimeout(() => navigate(`/cases/${newCaseId}`), 1500);
     } catch (e: any) {
-      setError(e?.response?.data?.error || 'Failed to create case');
+      const serverError = e?.response?.data?.error;
+      if (serverError === 'Case reference already exists') {
+        setError('This case reference already exists. Use a different reference or go to the existing case.');
+      } else {
+        setError(serverError || 'Failed to create case');
+      }
     } finally {
       setLoading(false);
     }
@@ -65,14 +76,9 @@ const UploadCasePage: React.FC = () => {
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>Case Information</Typography>
-          <TextField
-            label="Case Reference *"
-            value={caseReference}
-            onChange={e => setCaseReference(e.target.value)}
-            fullWidth
-            sx={{ mb: 2 }}
-            placeholder="e.g., VC-2024-001"
-          />
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Case reference will be generated automatically on submission.
+          </Typography>
           <TextField
             label="Vendor Display Name"
             value={vendorName}

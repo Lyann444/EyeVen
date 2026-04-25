@@ -102,7 +102,14 @@ class FileService:
 
         mime_type = file_storage.mimetype or "application/octet-stream"
 
-        stored_name = f"{uuid.uuid4().hex}_{filename}"
+        uuid_prefix = uuid.uuid4().hex[:8]
+        name_base, name_ext = os.path.splitext(filename)
+        max_base = 60 - len(uuid_prefix) - len(name_ext)
+        if max_base < 5:
+            max_base = 5
+        if len(name_base) > max_base:
+            name_base = name_base[:max_base]
+        stored_name = f"{uuid_prefix}_{name_base}{name_ext}"
         storage_path = os.path.join(upload_dir, stored_name)
         file_storage.save(storage_path)
 
