@@ -1,43 +1,9 @@
-import json
 import logging
 
 from app.extensions import db
-from app.models import EyeVenFormFieldValue, VendorCase
+from app.models import EyeVenFormFieldValue, VendorRegistry
 
 logger = logging.getLogger(__name__)
-
-MOCK_REGISTRY = [
-    {
-        "vendor_number": "V-10001",
-        "company_registered_name": "Satria Teknologi Sdn Bhd",
-        "company_registered_number": "202001012345",
-        "ssm_roc_rob_number": "202001012345",
-        "tax_sst_gst_number": "GST1234567",
-        "company_email": "info@satriateknologi.my",
-        "contact_person_name": "Ahmad Razak",
-        "business_type": "Sdn Bhd",
-    },
-    {
-        "vendor_number": "V-10002",
-        "company_registered_name": "Nusantara Solutions Sdn Bhd",
-        "company_registered_number": "201903004567",
-        "ssm_roc_rob_number": "201903004567",
-        "tax_sst_gst_number": "SST9876543",
-        "company_email": "admin@nusantarasolutions.com",
-        "contact_person_name": "Lim Wei Chong",
-        "business_type": "Sdn Bhd",
-    },
-    {
-        "vendor_number": "V-10003",
-        "company_registered_name": "Petra Dynamics Sdn Bhd",
-        "company_registered_number": "201506007890",
-        "ssm_roc_rob_number": "201506007890",
-        "tax_sst_gst_number": "SST5551234",
-        "company_email": "contact@petradynamics.my",
-        "contact_person_name": "Siti Aminah",
-        "business_type": "Sdn Bhd",
-    },
-]
 
 
 class InternalRegistryService:
@@ -58,19 +24,78 @@ class InternalRegistryService:
                 "field_comparisons": [],
             }
 
+        # --- Database lookup by SSM number (primary identifier) ---
+        db_records = []
+        if submitted_ssm:
+            db_records = VendorRegistry.query.filter(
+                db.func.lower(VendorRegistry.ssm_roc_rob_number) == submitted_ssm
+            ).all()
+
+        # Fallback: search by registered name if no SSM match
+        if not db_records and submitted_name:
+            db_records = VendorRegistry.query.filter(
+                db.func.lower(VendorRegistry.company_registered_name).contains(submitted_name)
+            ).all()
+
+        # Fallback: search by company registered number
+        if not db_records and submitted_reg_no:
+            db_records = VendorRegistry.query.filter(
+                db.func.lower(VendorRegistry.company_registered_number) == submitted_reg_no
+            ).all()
+
+        if not db_records:
+            return {
+                "match_status": "no_match",
+                "reason": "No matching record found in internal vendor registry",
+                "matched_vendor_number": None,
+                "match_score": 0,
+                "registry_record": None,
+                "field_comparisons": [],
+            }
+
+        # --- Risk flag check: immediate rejection if any match is high-risk ---
+        for record in db_records:
+            if record.is_past_high_risk:
+                logger.warning(
+                    "Vendor %s flagged as high-risk (reason: %s) for case %s",
+                    record.vendor_number,
+                    record.high_risk_reason or "unspecified",
+                    case_id,
+                )
+                return {
+                    "match_status": "rejected_high_risk_history",
+                    "reason": (
+                        f"Vendor {record.vendor_number} has a high-risk history in the registry"
+                    ),
+                    "matched_vendor_number": record.vendor_number,
+                    "match_score": 0,
+                    "blocking_issue": True,
+                    "high_risk_reason": record.high_risk_reason,
+                    "registry_record": {
+                        "vendor_number": record.vendor_number,
+                        "ssm_roc_rob_number": record.ssm_roc_rob_number,
+                        "company_registered_name": record.company_registered_name,
+                        "company_registered_number": record.company_registered_number,
+                        "is_past_high_risk": record.is_past_high_risk,
+                        "high_risk_reason": record.high_risk_reason,
+                    },
+                    "field_comparisons": [],
+                }
+
+        # --- Normal fuzzy matching and scoring for non-high-risk records ---
         best_match = None
         best_score = 0
         comparisons = []
 
-        for record in MOCK_REGISTRY:
+        for record in db_records:
             score = 0
             max_score = 0
             field_results = []
 
             checks = [
-                ("ssm_roc_rob_number", record["ssm_roc_rob_number"]),
-                ("company_registered_name", record["company_registered_name"]),
-                ("company_registered_number", record["company_registered_number"]),
+                ("ssm_roc_rob_number", record.ssm_roc_rob_number),
+                ("company_registered_name", record.company_registered_name),
+                ("company_registered_number", record.company_registered_number),
             ]
 
             for field_name, registry_value in checks:
@@ -84,7 +109,7 @@ class InternalRegistryService:
                         "registry_value": registry_value,
                         "match": "not_provided",
                     })
-                elif submitted == registry_value.lower():
+                elif submitted == (registry_value or "").lower():
                     score += 1
                     field_results.append({
                         "field_name": field_name,
@@ -92,7 +117,7 @@ class InternalRegistryService:
                         "registry_value": registry_value,
                         "match": "exact",
                     })
-                elif InternalRegistryService._fuzzy_match(submitted, registry_value.lower()):
+                elif InternalRegistryService._fuzzy_match(submitted, (registry_value or "").lower()):
                     score += 0.5
                     field_results.append({
                         "field_name": field_name,
@@ -109,8 +134,8 @@ class InternalRegistryService:
                     })
 
             comparisons.append({
-                "vendor_number": record["vendor_number"],
-                "company_name": record["company_registered_name"],
+                "vendor_number": record.vendor_number,
+                "company_name": record.company_registered_name,
                 "score": score,
                 "max_score": max_score,
                 "field_results": field_results,
@@ -129,18 +154,34 @@ class InternalRegistryService:
 
         result = {
             "match_status": match_status,
-            "matched_vendor_number": best_match["vendor_number"] if best_match else None,
+            "matched_vendor_number": best_match.vendor_number if best_match else None,
             "match_score": best_score,
             "field_comparisons": comparisons,
         }
 
         if best_match and match_status == "matched":
-            result["registry_record"] = best_match
+            result["registry_record"] = {
+                "vendor_number": best_match.vendor_number,
+                "ssm_roc_rob_number": best_match.ssm_roc_rob_number,
+                "company_registered_name": best_match.company_registered_name,
+                "company_registered_number": best_match.company_registered_number,
+                "tax_sst_gst_number": best_match.tax_sst_gst_number,
+                "company_email": best_match.company_email,
+                "contact_person_name": best_match.contact_person_name,
+                "business_type": best_match.business_type,
+                "is_past_high_risk": best_match.is_past_high_risk,
+            }
         elif best_match and match_status == "mismatched":
-            result["registry_record"] = best_match
+            result["registry_record"] = {
+                "vendor_number": best_match.vendor_number,
+                "ssm_roc_rob_number": best_match.ssm_roc_rob_number,
+                "company_registered_name": best_match.company_registered_name,
+                "company_registered_number": best_match.company_registered_number,
+                "is_past_high_risk": best_match.is_past_high_risk,
+            }
             result["mismatch_details"] = [
                 c for c in comparisons
-                if c["vendor_number"] == best_match["vendor_number"]
+                if c["vendor_number"] == best_match.vendor_number
                 and any(f["match"] == "mismatch" for f in c["field_results"])
             ]
         else:
