@@ -1,0 +1,17 @@
+Flask==3.1.0
+flask-cors==6.0.2
+Flask-Migrate==4.1.0
+Flask-SQLAlchemy==3.1.1
+PyMySQL==1.1.2
+SQLAlchemy==2.0.41
+
+paddleocr==3.5.0
+paddlepaddle==3.0.0
+pypdfium2==5.7.1
+pdf2image==1.17.0
+
+openpyxl
+jsonschema
+requests
+Werkzeug
+Pillow

@@ -4,11 +4,17 @@ import {
   AppBar, Toolbar, Typography, Button, Container, Box,
 } from '@mui/material';
 import DashboardIcon from '@mui/icons-material/Dashboard';
-import UploadIcon from '@mui/icons-material/Upload';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import ListAltIcon from '@mui/icons-material/ListAlt';
 
 const AppLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+
+  const isActive = (path: string) => {
+    if (path === '/') return location.pathname === '/';
+    return location.pathname.startsWith(path);
+  };
 
   return (
     <>
@@ -19,21 +25,30 @@ const AppLayout: React.FC = () => {
           </Typography>
           <Button
             color="inherit"
-            startIcon={<DashboardIcon />}
+            startIcon={<CloudUploadIcon />}
             onClick={() => navigate('/')}
             sx={{ mr: 1, textTransform: 'none' }}
-            variant={location.pathname === '/' ? 'outlined' : 'text'}
+            variant={isActive('/') && !location.pathname.startsWith('/cases') && !location.pathname.startsWith('/dashboard') ? 'outlined' : 'text'}
+          >
+            Upload
+          </Button>
+          <Button
+            color="inherit"
+            startIcon={<DashboardIcon />}
+            onClick={() => navigate('/dashboard')}
+            sx={{ mr: 1, textTransform: 'none' }}
+            variant={isActive('/dashboard') ? 'outlined' : 'text'}
           >
             Dashboard
           </Button>
           <Button
             color="inherit"
-            startIcon={<UploadIcon />}
-            onClick={() => navigate('/upload')}
+            startIcon={<ListAltIcon />}
+            onClick={() => navigate('/cases')}
             sx={{ textTransform: 'none' }}
-            variant={location.pathname === '/upload' ? 'outlined' : 'text'}
+            variant={isActive('/cases') ? 'outlined' : 'text'}
           >
-            Upload
+            Cases
           </Button>
         </Toolbar>
       </AppBar>
