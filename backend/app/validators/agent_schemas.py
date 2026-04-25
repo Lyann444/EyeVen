@@ -19,6 +19,7 @@ FIELD_STATUS_ENUM = [
     "unverifiable",
     "low_confidence",
     "declaration_missing",
+    "not_applicable",
 ]
 
 VALUE_SOURCE_ENUM = [

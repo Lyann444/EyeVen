@@ -15,13 +15,14 @@ ALLOWED INPUT CONTEXT:
 - The canonical EyeVen form field schema (provided below)
 
 CANONICAL EYEVEN FORM SCHEMA:
-Registration Type: new_registration, re_registration, current_vendor_number
+Registration Type: registration_type, current_vendor_number
 Section A. Company General Information: company_registered_name, company_registered_number, company_registered_address, company_website, company_email, main_office_phone_number, year_of_establishment, business_type, business_type_other
 Section B. Primary Contact Person: contact_person_name, designation, contact_email, contact_mobile_number
 Section C. Financial / Payment Information: bank_name, bank_account_name, bank_account_number, latest_annual_revenue_range
 Section D. Registration / Certification: ssm_roc_rob_number, tax_sst_gst_number, iso_certification_available, iso_certification_number, iso_certification_expiry_date
 Section E. Business & Risk Declaration: main_business_activities, top_3_major_clients, legal_disputes_past_5_years, legal_disputes_details, outsource_any_part_of_services, outsourcing_details, number_of_employees
-Supplier Declaration: authorized_signature_present, signatory_name, signatory_designation, signatory_ic_or_passport_number, declaration_date, company_chop_present
+For Supplier Declaration, extract only typed text fields:
+authorized_representative_name, authorized_representative_designation, authorized_representative_ic_or_passport_number, and submission_date.
 
 OUTPUT SCHEMA:
 Return a JSON object:
@@ -44,14 +45,14 @@ Return a JSON object:
         "source_type": "<string>"
       }},
       "document_sources": [
-    {{
-      "source_document_id": <integer or null>,
-      "page": <integer or null>,
-      "extracted_value": "<string or null>",
-      "source_type": "<string>",
-      "source_excerpt": "<string or null>"
-    }}
-  ],
+      {{
+        "source_document_id": <integer or null>,
+        "page": <integer or null>,
+        "extracted_value": "<string or null>",
+        "source_type": "<string>",
+        "source_excerpt": "<string or null>"
+      }}
+    ],
       "notes": "<string or null>"
     }}
   ],
@@ -80,23 +81,89 @@ Return a JSON object:
   "confidence": <float 0-1>
 }}
 
-SPECIAL RULE FOR company_registered_name:
-For company_registered_name, extract every company identity name found in each page/document, not only values labelled "Company Name".
+Registration Type must be extracted as a single text value.
 
-Treat the following as company name evidence:
-1. Company profile title/header, e.g. "Sunway Berhad SDN. BHD."
-2. Labels such as "Company Name", "Registered Name", "Vendor Name"
-3. Certificate holder name after phrases such as:
-   - "This is to certify that"
-   - "This certifies that"
-   - "has been incorporated"
-   - "has been assessed and found to comply"
-4. Bank account owner / account name if it belongs to the vendor
-5. Company name used as the subject in business nature / declaration sentences
+Valid normalized values:
+- New Registration
+- Re-Registration
 
-For multi-page PDFs, preserve page-level values in document_sources.
-Do not overwrite conflicting values.
-If different pages/documents contain different company names, set status = "conflicting" and confidence <= 0.4.
+If the form says "Registration Type: Re-Registration", output:
+field_name = registration_type
+extracted_value = Re-Registration
+normalized_value = Re-Registration
+status = provided_in_form
+
+Do not output separate checkbox fields such as new_registration or re_registration.
+CRITICAL FIELDS REQUIRE COMPLETE DOCUMENT SOURCES:
+
+For these fields, document_sources must include every page/document value found, not only one value:
+- company_registered_name
+- company_registered_number
+- ssm_roc_rob_number
+- tax_sst_gst_number
+- company_email
+- contact_person_name
+- bank_account_name
+- bank_account_number
+- iso_certification_number
+- iso_certification_expiry_date
+
+For non-critical fields, document_sources may be empty.
+
+CHECKBOX / TICK BOX RULE:
+
+For checkbox fields, infer the selected option only if the mark is visible in or near the box.
+
+Treat these as selected:
+[x], [X], [✓], [✔], [/], [■], [●]
+
+Treat these as not selected:
+[ ], [  ], empty checkbox
+
+For fields such as:
+- registration_type
+- business_type
+- latest_annual_revenue_range
+- iso_certification_available
+- legal_disputes_past_5_years
+- outsource_any_part_of_services
+
+If no option is visibly selected, set extracted_value = null and status = "missing" or "unverifiable".
+Never guess checkbox values.
+
+STRICT COMPANY NAME DOCUMENT SOURCES RULE:
+
+For company_registered_name, document_sources MUST include every company identity candidate found across all pages/documents.
+
+Do not return only the most likely or majority company name.
+
+If page 1 contains a company profile header and page 2 contains a certificate holder name, both must be included.
+
+Example:
+If the extracted document content contains:
+[PAGE 1]
+Sunway Berhad SDN. BHD.
+
+[PAGE 2]
+This is to certify that
+APEX OFFICE SUPPLIES SDN. BHD.
+
+[PAGE 3]
+This is to certify that
+APEX OFFICE SUPPLIES SDN. BHD.
+has been assessed and found to comply
+Then company_registered_name MUST be returned with:
+- field_name = company_registered_name
+- extracted_value = CONFLICTING_VALUES
+- normalized_value = null
+- status = conflicting
+- confidence = 0.3
+- document_sources containing:
+  1. source_document_id = actual file_id, page = 1, extracted_value = Sunway Berhad SDN. BHD., source_type = company_profile_header
+  2. source_document_id = actual file_id, page = 2, extracted_value = APEX OFFICE SUPPLIES SDN. BHD., source_type = ssm_certificate_holder
+  3. source_document_id = actual file_id, page = 3, extracted_value = APEX OFFICE SUPPLIES SDN. BHD., source_type = iso_certificate_holder
+
+If different company names appear in document_sources, do not choose one as final. Set extracted_value = "CONFLICTING_VALUES" and status = "conflicting".
 
 SPECIAL RULE FOR MALAYSIAN COMPANY REGISTRATION / SSM IDENTIFIERS:
 
@@ -169,4 +236,34 @@ EXTRACTED DOCUMENT CONTENT:
 
 EMAIL CONTENT:
 {email_content}
+
+DEPENDENT FIELD RULES:
+
+1. If business_type is not "Other":
+   - business_type_other must be extracted_value = "N/A"
+   - normalized_value = "N/A"
+   - status = "not_applicable"
+   - notes = "Not applicable because Business Type is not Other."
+
+2. If registration_type is "New Registration":
+   - current_vendor_number must be extracted_value = "N/A"
+   - status = "not_applicable"
+
+3. If registration_type is "Re-Registration":
+   - current_vendor_number is required.
+   - If missing, status = "missing".
+
+4. If iso_certification_available is "No":
+   - iso_certification_number must be "N/A" with status "not_applicable"
+   - iso_certification_expiry_date must be "N/A" with status "not_applicable"
+
+5. If legal_disputes_past_5_years is "No":
+   - legal_disputes_details must be "N/A" with status "not_applicable"
+
+6. If outsource_any_part_of_services is "No":
+   - outsourcing_details must be "N/A" with status "not_applicable"
+
+Do not mark conditional fields as missing when the parent answer makes them not applicable.
 """
+
+
