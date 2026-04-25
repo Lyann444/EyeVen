@@ -14,6 +14,13 @@ ALLOWED INPUT CONTEXT:
 - Email body content if available
 - The canonical EyeVen form field schema (provided below)
 
+DOCUMENT SOURCE TYPE RULE:
+For each document_sources item:
+- If the value came from the submitted procurement form, source_type must be "procurement_form".
+- If the value came from a company profile, SSM certificate, ISO certificate, bank confirmation, or any other supporting file, source_type must be "supporting_document".
+
+Do not use vague source_type values for critical comparison fields.
+
 CANONICAL EYEVEN FORM SCHEMA:
 Registration Type: registration_type, current_vendor_number
 Section A. Company General Information: company_registered_name, company_registered_number, company_registered_address, company_website, company_email, main_office_phone_number, year_of_establishment, business_type, business_type_other
@@ -231,6 +238,42 @@ For missing, not_applicable, unverifiable, or unsupported fields:
 - evidence_reference may be null
 - document_sources must be [] if no evidence exists
 - do not fabricate evidence_reference
+
+STRICT CRITICAL FIELD COMPARISON RULE:
+
+When intake_classification = procurement_form_present, compare procurement form values against supporting document values for these fields:
+
+- company_registered_name
+- company_registered_number
+- ssm_roc_rob_number
+- tax_sst_gst_number
+- company_email
+- contact_email
+- contact_person_name
+- bank_account_name
+- bank_account_number
+- iso_certification_number
+- iso_certification_expiry_date
+
+For these fields:
+- The procurement_form value is the submitted value.
+- The supporting_document values are evidence values.
+matched_with_evidence
+= procurement_form value exists
++ at least one supporting_document value exists
++ all normalized values are aligned
+
+mismatched_with_evidence
+= procurement_form value exists
++ supporting_document value exists
++ form value differs from supporting document
+
+conflicting
+= multiple supporting documents disagree with each other
+OR company identity is seriously inconsistent across documents (e.g. company name in company profile differs from certificate holder name)
+- For company_registered_name, company_registered_number, ssm_roc_rob_number, bank_account_number, and tax_sst_gst_number, mismatches are critical.
+- Do not mark a field as matched_with_evidence using only the procurement_form value.
+- If only procurement_form value exists and no supporting evidence exists, set status = provided_in_form or unverifiable, not matched_with_evidence.
 
 INTAKE CLASSIFICATION:
 {intake_classification}
