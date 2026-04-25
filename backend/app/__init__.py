@@ -20,6 +20,7 @@ def create_app(config_name="development"):
         RoutingDecision,
         EmailDraft,
         ReprocessingRun,
+        VendorRegistry,
     )
 
     from app.routes.case_routes import case_bp

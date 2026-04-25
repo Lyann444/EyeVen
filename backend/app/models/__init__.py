@@ -6,6 +6,7 @@ from app.models.policy_evaluation_run import PolicyEvaluationRun
 from app.models.routing_decision import RoutingDecision
 from app.models.email_draft import EmailDraft
 from app.models.reprocessing_run import ReprocessingRun
+from app.models.vendor_registry import VendorRegistry
 
 __all__ = [
     "VendorCase",
@@ -16,4 +17,5 @@ __all__ = [
     "RoutingDecision",
     "EmailDraft",
     "ReprocessingRun",
+    "VendorRegistry",
 ]

@@ -102,12 +102,25 @@ class ContextAssembler:
             ],
         }, indent=2)
 
-        return {
+        registry_result = InternalRegistryService.match_vendor(case_id)
+        external_result = ExternalVerificationService.verify_identifiers(case_id)
+
+        result = {
             "form_fields": form_fields,
             "alignment_report": alignment_report,
-            "internal_registry": json.dumps(InternalRegistryService.match_vendor(case_id), indent=2),
-            "external_verification": json.dumps(ExternalVerificationService.verify_identifiers(case_id), indent=2),
+            "internal_registry": json.dumps(registry_result, indent=2),
+            "external_verification": json.dumps(external_result, indent=2),
         }
+
+        # Surface blocking flags for downstream Policy/Routing agents
+        if registry_result.get("match_status") == "rejected_high_risk_history":
+            result["blocking_flags"] = {
+                "high_risk_vendor": True,
+                "reason": registry_result.get("reason", ""),
+                "high_risk_reason": registry_result.get("high_risk_reason"),
+            }
+
+        return result
 
     @staticmethod
     def policy_evaluation(case_id: int) -> dict:
