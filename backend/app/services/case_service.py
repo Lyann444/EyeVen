@@ -176,9 +176,8 @@ class CaseService:
     @staticmethod
     def _seed_form_fields(case_id):
         CANONICAL_FIELDS = [
-            ("registration_type", "new_registration", "Registration Type (New Registration)"),
-            ("registration_type", "re_registration", "Registration Type (Re-registration)"),
-            ("registration_type", "current_vendor_number", "Current Vendor Number (if re-registration)"),
+            ("registration_type", "registration_type", "Registration Type"),
+            ("registration_type", "current_vendor_number", "Current Vendor Number"),
             ("company_general", "company_registered_name", "Company Registered Name"),
             ("company_general", "company_registered_number", "Company Registered Number"),
             ("company_general", "company_registered_address", "Company Registered Address"),
@@ -208,12 +207,10 @@ class CaseService:
             ("risk_declaration", "outsource_any_part_of_services", "Outsource Any Part of Services"),
             ("risk_declaration", "outsourcing_details", "Outsourcing Details"),
             ("risk_declaration", "number_of_employees", "Number of Employees"),
-            ("supplier_declaration", "authorized_signature_present", "Authorized Signature Present"),
-            ("supplier_declaration", "signatory_name", "Signatory Name"),
-            ("supplier_declaration", "signatory_designation", "Signatory Designation"),
-            ("supplier_declaration", "signatory_ic_or_passport_number", "Signatory IC / Passport Number"),
-            ("supplier_declaration", "declaration_date", "Declaration Date"),
-            ("supplier_declaration", "company_chop_present", "Company Chop Present"),
+            ("supplier_declaration", "authorized_representative_name", "Authorized Representative Name"),
+            ("supplier_declaration", "authorized_representative_designation", "Designation / Position"),
+            ("supplier_declaration", "authorized_representative_ic_or_passport_number", "IC/Passport No."),
+            ("supplier_declaration", "submission_date", "Submission Date"),
         ]
 
         for section, field_name, field_label in CANONICAL_FIELDS:

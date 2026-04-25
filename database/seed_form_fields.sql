@@ -66,12 +66,10 @@ USE eyeven;
 -- risk_declaration | number_of_employees        | Number of Employees                 | Y
 
 -- Supplier Declaration
--- supplier_declaration | authorized_signature_present   | Authorized Signature Present   | Y
--- supplier_declaration | signatory_name                 | Signatory Name                 | Y
--- supplier_declaration | signatory_designation          | Signatory Designation          | Y
--- supplier_declaration | signatory_ic_or_passport_number| Signatory IC / Passport Number | Y
--- supplier_declaration | declaration_date               | Declaration Date               | Y
--- supplier_declaration | company_chop_present           | Company Chop Present           | Y
+-- supplier_declaration | authorized_representative_name                  | Authorized Representative Name | Y
+-- supplier_declaration | authorized_representative_designation           | Designation / Position         | Y
+-- supplier_declaration | authorized_representative_ic_or_passport_number | IC/Passport No.                | Y
+-- supplier_declaration | submission_date                                 | Submission Date                | Y
 
 
 -- ============================================================
@@ -137,12 +135,10 @@ BEGIN
 
     -- Supplier Declaration
     INSERT INTO eyeven_form_field_values (vendor_case_id, section_name, field_name, field_label, value_source, status) VALUES
-        (p_vendor_case_id, 'supplier_declaration', 'authorized_signature_present',    'Authorized Signature Present',    'unknown', 'missing'),
-        (p_vendor_case_id, 'supplier_declaration', 'signatory_name',                  'Signatory Name',                  'unknown', 'missing'),
-        (p_vendor_case_id, 'supplier_declaration', 'signatory_designation',           'Signatory Designation',           'unknown', 'missing'),
-        (p_vendor_case_id, 'supplier_declaration', 'signatory_ic_or_passport_number', 'Signatory IC / Passport Number',  'unknown', 'missing'),
-        (p_vendor_case_id, 'supplier_declaration', 'declaration_date',                'Declaration Date',                'unknown', 'missing'),
-        (p_vendor_case_id, 'supplier_declaration', 'company_chop_present',            'Company Chop Present',            'unknown', 'missing');
+    (p_vendor_case_id, 'supplier_declaration', 'authorized_representative_name',                  'Authorized Representative Name', 'unknown', 'missing'),
+    (p_vendor_case_id, 'supplier_declaration', 'authorized_representative_designation',           'Designation / Position',         'unknown', 'missing'),
+    (p_vendor_case_id, 'supplier_declaration', 'authorized_representative_ic_or_passport_number', 'IC/Passport No.',                'unknown', 'missing'),
+    (p_vendor_case_id, 'supplier_declaration', 'submission_date',                                 'Submission Date',                'unknown', 'missing');
 END //
 
 DELIMITER ;

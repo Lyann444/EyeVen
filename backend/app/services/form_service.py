@@ -14,6 +14,134 @@ logger = logging.getLogger(__name__)
 
 class FormService:
     @staticmethod
+    def _normalize_for_alignment(field_name, value):
+        if value is None:
+            return ""
+
+        import re
+
+        value = str(value).strip().lower()
+
+        if not value or value in {"n/a", "na", "none", "-", "null"}:
+            return ""
+
+        id_like_fields = {
+            "company_registered_number",
+            "ssm_roc_rob_number",
+            "tax_sst_gst_number",
+            "bank_account_number",
+            "iso_certification_number",
+        }
+
+        if field_name in id_like_fields:
+            return re.sub(r"[^a-z0-9]", "", value)
+
+        if "email" in field_name:
+            return value.replace(" ", "")
+
+        if field_name == "iso_certification_expiry_date":
+            return " ".join(value.replace(",", "").split())
+
+        return " ".join(
+            value.replace(".", "")
+                .replace(",", "")
+                .split()
+        )
+
+
+    @staticmethod
+    def _enforce_evidence_alignment(glm_result):
+        critical_fields = {
+            "company_registered_name",
+            "company_registered_number",
+            "ssm_roc_rob_number",
+            "tax_sst_gst_number",
+            "company_email",
+            "contact_email",
+            "contact_person_name",
+            "bank_account_name",
+            "bank_account_number",
+            "iso_certification_number",
+            "iso_certification_expiry_date",
+        }
+
+        company_identity_fields = {
+            "company_registered_name",
+            "company_registered_number",
+            "ssm_roc_rob_number",
+        }
+
+        for field in glm_result.get("fields", []):
+            field_name = field.get("field_name")
+
+            if field_name not in critical_fields:
+                continue
+
+            sources = field.get("document_sources") or []
+
+            form_values = []
+            support_values = []
+
+            for src in sources:
+                source_type = (src.get("source_type") or "").lower()
+                value = src.get("extracted_value")
+
+                if not value:
+                    continue
+
+                normalized = FormService._normalize_for_alignment(field_name, value)
+
+                if not normalized:
+                    continue
+
+                if "procurement_form" in source_type:
+                    form_values.append(normalized)
+                else:
+                    support_values.append(normalized)
+
+            form_set = set(form_values)
+            support_set = set(support_values)
+            all_values = form_set | support_set
+
+            # Cannot be "matched with evidence" if there is no supporting evidence
+            if form_set and not support_set:
+                if field.get("status") == "matched_with_evidence":
+                    field["status"] = "provided_in_form"
+                    field["notes"] = "Value was found in the procurement form, but no supporting evidence was found."
+                continue
+
+            # If form and supporting docs exist, they must align
+            if form_set and support_set:
+                if form_set == support_set:
+                    field["status"] = "matched_with_evidence"
+                    field["confidence"] = max(field.get("confidence") or 0.0, 0.85)
+                else:
+                    if field_name in company_identity_fields:
+                        field["status"] = "conflicting"
+                        field["confidence"] = min(field.get("confidence") or 0.4, 0.4)
+                        field["notes"] = "Procurement form identity value does not align with supporting document evidence."
+                        if field_name == "company_registered_name":
+                            field["extracted_value"] = "CONFLICTING_VALUES"
+                            field["normalized_value"] = None
+                    else:
+                        field["status"] = "mismatched_with_evidence"
+                        field["confidence"] = min(field.get("confidence") or 0.6, 0.6)
+                        field["notes"] = "Procurement form value does not align with supporting document evidence."
+                continue
+
+            # If only supporting docs exist, check whether the supporting docs agree
+            if not form_set and len(support_set) == 1:
+                if field.get("status") == "matched_with_evidence":
+                    field["status"] = "filled_from_supporting_docs"
+                    field["notes"] = "Value was filled from supporting documents only; no procurement form value was found."
+
+            if not form_set and len(support_set) > 1:
+                field["status"] = "conflicting"
+                field["confidence"] = min(field.get("confidence") or 0.4, 0.4)
+                field["notes"] = "Supporting documents contain different values for this field."
+
+        return glm_result
+    @staticmethod
     def structure_form(case_id):
         case = VendorCase.query.get_or_404(case_id)
 
@@ -34,6 +162,7 @@ class FormService:
                 max_tokens=16384,
                 temperature=0.1,
             )
+            glm_result = FormService._enforce_evidence_alignment(glm_result)
         except (GlmServiceError, GlmSchemaValidationError) as e:
             logger.error("Canonical form GLM call failed for case %d: %s", case_id, e)
             case.current_state = "verification_blocked"
@@ -162,7 +291,7 @@ class FormService:
 
             # Build document_values from GLM document_sources
             doc_vals = {}
-            for ds in field_data.get("document_sources", []):
+            for ds in (field_data.get("document_sources") or []):
                 doc_id = ds.get("source_document_id")
                 page = ds.get("page")
                 value = ds.get("extracted_value")

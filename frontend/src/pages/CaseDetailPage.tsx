@@ -100,7 +100,9 @@ const CaseDetailPage: React.FC = () => {
 
   const populated = formFields.filter(f => f.value_text).length;
   const missing = formFields.filter(f => f.status === 'missing').length;
-  const conflicting = formFields.filter(f => f.status === 'conflicting').length;
+  const issues = formFields.filter(f =>
+    ['conflicting', 'mismatched_with_evidence', 'unverifiable', 'low_confidence'].includes(f.status)
+  ).length;
 
   const sections = Array.from(new Set(formFields.map(f => f.section_name)));
 
@@ -136,7 +138,7 @@ const CaseDetailPage: React.FC = () => {
               <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
                 <Chip label={`${populated} Populated`} color="success" size="small" />
                 <Chip label={`${missing} Missing`} color="default" size="small" />
-                <Chip label={`${conflicting} Conflicting`} color="error" size="small" />
+                <Chip label={`${issues} Issues`} color="error" size="small" />
                 <Typography variant="body2" color="text.secondary">
                   Intake: {caseData.intake_type === 'procurement_form_present' ? 'Form Present' : 'Form Absent'}
                 </Typography>

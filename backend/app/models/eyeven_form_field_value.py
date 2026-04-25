@@ -34,6 +34,7 @@ class EyeVenFormFieldValue(db.Model):
             "unverifiable",
             "low_confidence",
             "declaration_missing",
+            "not_applicable",
         ),
         nullable=False,
     )
