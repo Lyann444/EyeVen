@@ -204,17 +204,16 @@ VERIFICATION_SCHEMA = {
             "enum": ["minor", "moderate", "critical", None],
         },
         "verified_identity_summary": {"type": "string"},
-        "critical_conflicts": {
+"critical_conflicts": {
             "type": "array",
             "items": {
-                "type": "object",
+                "type": ["object", "string"],
                 "properties": {
                     "field_name": {"type": "string"},
                     "description": {"type": "string"},
                     "severity": {"type": "string", "enum": ["minor", "moderate", "critical"]},
                     "evidence_reference": EVIDENCE_REFERENCE,
-                },
-                "required": ["field_name", "description", "severity"],
+                }
             },
         },
         "missing_critical_fields": {
@@ -224,34 +223,31 @@ VERIFICATION_SCHEMA = {
         "minor_mismatches": {
             "type": "array",
             "items": {
-                "type": "object",
+                "type": ["object", "string"],
                 "properties": {
                     "field_name": {"type": "string"},
                     "description": {"type": "string"},
-                },
-                "required": ["field_name", "description"],
+                }
             },
         },
         "moderate_mismatches": {
             "type": "array",
             "items": {
-                "type": "object",
+                "type": ["object", "string"],
                 "properties": {
                     "field_name": {"type": "string"},
                     "description": {"type": "string"},
-                },
-                "required": ["field_name", "description"],
+                }
             },
         },
         "critical_mismatches": {
             "type": "array",
             "items": {
-                "type": "object",
+                "type": ["object", "string"],
                 "properties": {
                     "field_name": {"type": "string"},
                     "description": {"type": "string"},
-                },
-                "required": ["field_name", "description"],
+                }
             },
         },
         "internal_registry_match_status": {
