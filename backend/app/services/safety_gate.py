@@ -40,7 +40,7 @@ class SafetyGate:
     # Additional fields required only when the condition applies.
     CONDITIONAL_FIELDS = {
         "current_vendor_number": "re_registration",
-        "business_type_other": "business_type_other",
+        "business_type_other": "business_type_is_other",
         "iso_certification_number": "iso_certification_available",
         "iso_certification_expiry_date": "iso_certification_available",
         "legal_disputes_details": "legal_disputes_past_5_years",
@@ -93,7 +93,7 @@ class SafetyGate:
     def _condition_applies(condition, values, registration_type) -> bool:
         if condition == "re_registration":
             return registration_type == "re_registration"
-        if condition == "business_type_other":
+        if condition == "business_type_is_other":
             return values.get("business_type", "") == "other"
         return values.get(condition, "") in SafetyGate.AFFIRMATIVE_VALUES
 
