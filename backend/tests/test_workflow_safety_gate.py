@@ -112,7 +112,7 @@ class WorkflowSafetyGateTests(unittest.TestCase):
                 self.assertEqual(decision, "manual_review_required")
                 self.assertEqual(action, "Escalate for human review")
                 self.assertIn(
-                    "approval_confidence_below_threshold",
+                    "approval_confidence_missing_or_invalid",
                     gate_result["reasons"],
                 )
         evaluate.assert_not_called()
