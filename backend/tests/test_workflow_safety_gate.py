@@ -94,6 +94,49 @@ class WorkflowSafetyGateTests(unittest.TestCase):
         self.assertIn("approval_confidence_below_threshold", gate_result["reasons"])
         evaluate.assert_not_called()
 
+
+    @patch("app.orchestrators.workflow_orchestrator.SafetyGate.evaluate")
+    def test_non_finite_confidence_is_forced_to_manual_review(self, evaluate):
+        for invalid_confidence in (float("nan"), float("inf"), -float("inf")):
+            with self.subTest(confidence=invalid_confidence):
+                decision, _, action, gate_result = (
+                    WorkflowOrchestrator._apply_safety_gate(
+                        42,
+                        "complete_verified",
+                        "Vendor appears eligible.",
+                        "Approve vendor",
+                        invalid_confidence,
+                    )
+                )
+
+                self.assertEqual(decision, "manual_review_required")
+                self.assertEqual(action, "Escalate for human review")
+                self.assertIn(
+                    "approval_confidence_below_threshold",
+                    gate_result["reasons"],
+                )
+        evaluate.assert_not_called()
+
+    @patch("app.orchestrators.workflow_orchestrator.SafetyGate.evaluate")
+    def test_string_confidence_is_forced_to_manual_review(self, evaluate):
+        decision, _, action, gate_result = (
+            WorkflowOrchestrator._apply_safety_gate(
+                42,
+                "complete_verified",
+                "Vendor appears eligible.",
+                "Approve vendor",
+                "0.99",
+            )
+        )
+
+        self.assertEqual(decision, "manual_review_required")
+        self.assertEqual(action, "Escalate for human review")
+        self.assertIn(
+            "approval_confidence_missing_or_invalid",
+            gate_result["reasons"],
+        )
+        evaluate.assert_not_called()
+
     @patch("app.orchestrators.workflow_orchestrator.SafetyGate.evaluate")
     def test_non_approval_decision_does_not_call_gate(self, evaluate):
         result = WorkflowOrchestrator._apply_safety_gate(
