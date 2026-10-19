@@ -14,6 +14,7 @@ from app.models import (
 from app.services.form_service import FormService
 from app.services.glm_service import GlmService, GlmServiceError
 from app.services.context_assembler import ContextAssembler
+from app.services.safety_gate import SafetyGate
 from app.prompts.verification import VERIFICATION_PROMPT
 from app.prompts.policy_evaluation import POLICY_EVALUATION_PROMPT
 from app.prompts.routing import ROUTING_PROMPT
@@ -191,6 +192,36 @@ class WorkflowOrchestrator:
             db.session.commit()
             return {"status": "glm_failed", "error": str(e)}
 
+        decision_code = glm_result.get("decision_code")
+        decision_reasoning = glm_result.get("decision_reasoning_summary", "")
+        recommended_action = glm_result.get("recommended_procurement_action")
+
+        # The LLM may recommend approval, but only deterministic Python rules
+        # can allow the case to enter the completed state.
+        safety_gate_result = None
+        if decision_code == "complete_verified":
+            safety_gate_result = SafetyGate.evaluate(case_id)
+            if not safety_gate_result["allowed"]:
+                decision_code = safety_gate_result["suggested_decision"]
+                reasons = ", ".join(safety_gate_result["reasons"])
+                decision_reasoning = (
+                    decision_reasoning
+                    + " | Safety gate blocked automatic approval: "
+                    + reasons
+                ).strip(" |")
+                recommended_action = (
+                    "Request missing information"
+                    if decision_code == "follow_up_required"
+                    else "Escalate for human review"
+                    if decision_code == "manual_review_required"
+                    else "Escalate to high-risk procurement review"
+                )
+                logger.warning(
+                    "Safety gate blocked approval for case %d: %s",
+                    case_id,
+                    reasons,
+                )
+
         latest_verification = VerificationRun.query.filter_by(
             vendor_case_id=case_id
         ).order_by(VerificationRun.created_at.desc()).first()
@@ -202,14 +233,13 @@ class WorkflowOrchestrator:
             vendor_case_id=case_id,
             verification_run_id=latest_verification.id if latest_verification else None,
             policy_evaluation_run_id=latest_policy.id if latest_policy else None,
-            decision_code=glm_result.get("decision_code"),
-            recommended_procurement_action=glm_result.get("recommended_procurement_action"),
-            decision_reasoning_summary=glm_result.get("decision_reasoning_summary"),
+            decision_code=decision_code,
+            recommended_procurement_action=recommended_action,
+            decision_reasoning_summary=decision_reasoning,
             confidence_score=glm_result.get("confidence"),
         )
         db.session.add(decision)
 
-        decision_code = glm_result.get("decision_code")
         case.latest_routing_decision = decision_code
 
         state_map = {
@@ -224,9 +254,10 @@ class WorkflowOrchestrator:
 
         return {
             "decision_code": decision_code,
-            "reasoning": glm_result.get("decision_reasoning_summary"),
+            "reasoning": decision_reasoning,
             "confidence": glm_result.get("confidence"),
             "next_state": case.current_state,
+            "safety_gate": safety_gate_result,
         }
 
     @staticmethod
