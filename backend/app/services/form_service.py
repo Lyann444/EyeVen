@@ -168,6 +168,7 @@ class FormService:
                 evidence = field_data.get("evidence_reference") or {}
                 new_field = EyeVenFormFieldValue(
                     vendor_case_id=case_id,
+                    section_name=field_data.get("section_name", "unknown"),
                     field_name=field_name,
                     field_label=field_data.get("field_label", field_name),
                     value_text=field_data.get("extracted_value"),
@@ -180,3 +181,5 @@ class FormService:
                     notes=field_data.get("notes"),
                 )
                 db.session.add(new_field)
+
+        db.session.flush()
