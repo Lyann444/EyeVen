@@ -10,7 +10,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import apiClient from '../services/apiClient';
 import { caseService } from '../services/caseService';
 import { auditService } from '../services/auditService';
-import { VendorCase, FormFieldValue } from '../types';
+import { VendorCase, FormFieldValue, WorkflowTraceStage } from '../types';
 
 const statusColor = (s: string) => {
   switch (s) {
@@ -47,7 +47,7 @@ const CaseDetailPage: React.FC = () => {
   const [audit, setAudit] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
-  const [workflowTrace, setWorkflowTrace] = useState<any[]>([]);
+  const [workflowTrace, setWorkflowTrace] = useState<WorkflowTraceStage[]>([]);
   const [workflowMessage, setWorkflowMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -181,7 +181,7 @@ const CaseDetailPage: React.FC = () => {
             </Alert>
           ) : (
             <Stack spacing={1.5}>
-              {workflowTrace.map((item: any, index: number) => (
+              {workflowTrace.map((item: WorkflowTraceStage, index: number) => (
                 <Box key={`${item.stage || 'stage'}-${index}`} sx={{
                   display: 'flex', gap: 2, alignItems: 'flex-start', p: 1.5,
                   border: '1px solid', borderColor: 'divider', borderRadius: 2,
@@ -191,6 +191,17 @@ const CaseDetailPage: React.FC = () => {
                     <Typography sx={{ fontWeight: 600 }}>{fmtStatus(item.stage || 'unknown stage')}</Typography>
                     <Typography variant="body2" color="text.secondary">
                       {fmtStatus(item.state_before || 'unknown')} → {fmtStatus(item.state_after || 'unknown')}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {typeof item.duration_ms === 'number'
+                        ? `Duration: ${item.duration_ms.toFixed(2)} ms`
+                        : 'Duration unavailable'}
+                      {item.started_at
+                        ? ` · Started ${new Date(item.started_at).toLocaleTimeString()}`
+                        : ''}
+                      {item.completed_at
+                        ? ` · Finished ${new Date(item.completed_at).toLocaleTimeString()}`
+                        : ''}
                     </Typography>
                   </Box>
                   <Chip
