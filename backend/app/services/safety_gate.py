@@ -70,6 +70,11 @@ class SafetyGate:
         "mismatched_with_evidence",
     }
     AFFIRMATIVE_VALUES = {"yes", "y", "true", "1"}
+    NEGATIVE_VALUES = {"no", "n", "false", "0"}
+    AFFIRMATIVE_REQUIRED_FIELDS = {
+        "authorized_signature_present",
+        "company_chop_present",
+    }
 
     @staticmethod
     def evaluate(case_id: int) -> dict:
@@ -201,6 +206,11 @@ class SafetyGate:
             value = SafetyGate._field_value(field)
             if status in SafetyGate.RECOVERABLE_FIELD_STATUSES or not value:
                 recoverable_gaps.append(field_name)
+            elif (
+                field_name in SafetyGate.AFFIRMATIVE_REQUIRED_FIELDS
+                and value in SafetyGate.NEGATIVE_VALUES
+            ):
+                recoverable_gaps.append(field_name + ":must_be_present")
 
             if (
                 field_name in SafetyGate.EVIDENCE_REQUIRED_FIELDS
