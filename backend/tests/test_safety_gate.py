@@ -12,10 +12,11 @@ def verification(status="verified", severity="minor", run_status="completed"):
     )
 
 
-def policy(risk_band="low", blocking_issue_count=0):
+def policy(risk_band="low", blocking_issue_count=0, risk_flags="[]"):
     return SimpleNamespace(
         risk_band=risk_band,
         blocking_issue_count=blocking_issue_count,
+        risk_flags=risk_flags,
     )
 
 
@@ -82,6 +83,24 @@ class SafetyGateTests(unittest.TestCase):
 
         self.assertFalse(result["allowed"])
         self.assertEqual(result["suggested_decision"], "manual_review_required")
+
+    def test_blocking_flag_prevents_approval_even_if_count_is_zero(self):
+        result = SafetyGate.evaluate_results(
+            verification(),
+            policy(risk_flags='[{"severity":"blocking","flag_type":"identity_verification_gap"}]'),
+            [field()],
+        )
+
+        self.assertFalse(result["allowed"])
+        self.assertIn("blocking_risk_flag_present", result["reasons"])
+
+    def test_malformed_risk_flags_fail_closed(self):
+        result = SafetyGate.evaluate_results(
+            verification(), policy(risk_flags="not-json"), [field()]
+        )
+
+        self.assertFalse(result["allowed"])
+        self.assertIn("policy_risk_flags_malformed", result["reasons"])
 
 
 if __name__ == "__main__":
