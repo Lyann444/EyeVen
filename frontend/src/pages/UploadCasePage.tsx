@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Box, Typography, Button, TextField, Card, CardContent, Alert, LinearProgress,
+  Box, Typography, Button, TextField, Card, CardContent, Alert, LinearProgress, FormHelperText,
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import apiClient from '../services/apiClient';
@@ -71,7 +71,8 @@ const UploadCasePage: React.FC = () => {
             onChange={e => setCaseReference(e.target.value)}
             fullWidth
             sx={{ mb: 2 }}
-            placeholder="e.g., VC-2024-001"
+            placeholder="e.g., EV-2026-001"
+            helperText="Unique tracking ID for this vendor submission. Use an existing reference only when continuing that same case; each new submission needs a unique reference."
           />
           <TextField
             label="Vendor Display Name"
