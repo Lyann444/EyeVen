@@ -174,6 +174,37 @@ class WorkflowOrchestrator:
         }
 
     @staticmethod
+    def _apply_safety_gate(case_id, decision_code, decision_reasoning, recommended_action):
+        """Veto an LLM approval recommendation when deterministic checks fail."""
+        if decision_code != "complete_verified":
+            return decision_code, decision_reasoning, recommended_action, None
+
+        gate_result = SafetyGate.evaluate(case_id)
+        if gate_result["allowed"]:
+            return decision_code, decision_reasoning, recommended_action, gate_result
+
+        decision_code = gate_result["suggested_decision"]
+        reasons = ", ".join(gate_result["reasons"])
+        decision_reasoning = (
+            decision_reasoning
+            + " | Safety gate blocked automatic approval: "
+            + reasons
+        ).strip(" |")
+        recommended_action = (
+            "Request missing information"
+            if decision_code == "follow_up_required"
+            else "Escalate for human review"
+            if decision_code == "manual_review_required"
+            else "Escalate to high-risk procurement review"
+        )
+        logger.warning(
+            "Safety gate blocked approval for case %d: %s",
+            case_id,
+            reasons,
+        )
+        return decision_code, decision_reasoning, recommended_action, gate_result
+
+    @staticmethod
     def _run_routing(case_id):
         case = VendorCase.query.get(case_id)
 
@@ -196,31 +227,19 @@ class WorkflowOrchestrator:
         decision_reasoning = glm_result.get("decision_reasoning_summary", "")
         recommended_action = glm_result.get("recommended_procurement_action")
 
-        # The LLM may recommend approval, but only deterministic Python rules
-        # can allow the case to enter the completed state.
-        safety_gate_result = None
-        if decision_code == "complete_verified":
-            safety_gate_result = SafetyGate.evaluate(case_id)
-            if not safety_gate_result["allowed"]:
-                decision_code = safety_gate_result["suggested_decision"]
-                reasons = ", ".join(safety_gate_result["reasons"])
-                decision_reasoning = (
-                    decision_reasoning
-                    + " | Safety gate blocked automatic approval: "
-                    + reasons
-                ).strip(" |")
-                recommended_action = (
-                    "Request missing information"
-                    if decision_code == "follow_up_required"
-                    else "Escalate for human review"
-                    if decision_code == "manual_review_required"
-                    else "Escalate to high-risk procurement review"
-                )
-                logger.warning(
-                    "Safety gate blocked approval for case %d: %s",
-                    case_id,
-                    reasons,
-                )
+        # The LLM may recommend approval, but deterministic Python rules
+        # can veto it before the decision is persisted.
+        (
+            decision_code,
+            decision_reasoning,
+            recommended_action,
+            safety_gate_result,
+        ) = WorkflowOrchestrator._apply_safety_gate(
+            case_id,
+            decision_code,
+            decision_reasoning,
+            recommended_action,
+        )
 
         latest_verification = VerificationRun.query.filter_by(
             vendor_case_id=case_id
