@@ -173,6 +173,38 @@ class SafetyGateTests(unittest.TestCase):
         self.assertTrue(result["allowed"])
         self.assertEqual(result["suggested_decision"], "complete_verified")
 
+
+    def test_negative_signature_declaration_prevents_auto_approval(self):
+        fields = complete_fields()
+        signature = next(
+            item for item in fields
+            if item.field_name == "authorized_signature_present"
+        )
+        signature.value_text = "no"
+        signature.normalized_value_text = "no"
+
+        result = SafetyGate.evaluate_results(verification(), policy(), fields)
+
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["suggested_decision"], "follow_up_required")
+        self.assertIn(
+            "authorized_signature_present:must_be_present",
+            result["recoverable_fields"],
+        )
+
+    def test_negative_company_chop_declaration_prevents_auto_approval(self):
+        fields = complete_fields()
+        chop = next(
+            item for item in fields if item.field_name == "company_chop_present"
+        )
+        chop.value_text = "no"
+        chop.normalized_value_text = "no"
+
+        result = SafetyGate.evaluate_results(verification(), policy(), fields)
+
+        self.assertFalse(result["allowed"])
+        self.assertIn("company_chop_present:must_be_present", result["recoverable_fields"])
+
     def test_missing_optional_field_does_not_block_approval(self):
         fields = complete_fields()
         fields.append(make_field("company_website", status="missing", value=""))
