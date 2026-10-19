@@ -112,6 +112,9 @@ export interface WorkflowTraceStage {
   state_before: string;
   state_after: string;
   status: string;
+  started_at: string | null;
+  completed_at: string;
+  duration_ms: number | null;
 }
 
 export interface RoutingDecision {
