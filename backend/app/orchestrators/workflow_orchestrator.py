@@ -52,7 +52,7 @@ class WorkflowOrchestrator:
             results["form_structuring"] = form_result
             case = VendorCase.query.get(case_id)
             trace.append(WorkflowOrchestrator._trace_stage(
-                "form_structuring", state_before, case.current_state, form_result,
+                case_id, "form_structuring", state_before, case.current_state, form_result,
                 started_at=stage_started_at, started_clock=stage_started_clock,
             ))
 
@@ -65,7 +65,7 @@ class WorkflowOrchestrator:
             results["verification"] = ver_result
             case = VendorCase.query.get(case_id)
             trace.append(WorkflowOrchestrator._trace_stage(
-                "verification", state_before, case.current_state, ver_result,
+                case_id, "verification", state_before, case.current_state, ver_result,
                 started_at=stage_started_at, started_clock=stage_started_clock,
             ))
 
@@ -81,7 +81,7 @@ class WorkflowOrchestrator:
             results["policy_evaluation"] = policy_result
             case = VendorCase.query.get(case_id)
             trace.append(WorkflowOrchestrator._trace_stage(
-                "policy_evaluation", state_before, case.current_state, policy_result,
+                case_id, "policy_evaluation", state_before, case.current_state, policy_result,
                 started_at=stage_started_at, started_clock=stage_started_clock,
             ))
 
@@ -94,7 +94,7 @@ class WorkflowOrchestrator:
             results["routing"] = routing_result
             case = VendorCase.query.get(case_id)
             trace.append(WorkflowOrchestrator._trace_stage(
-                "routing", state_before, case.current_state, routing_result,
+                case_id, "routing", state_before, case.current_state, routing_result,
                 started_at=stage_started_at, started_clock=stage_started_clock,
             ))
 
@@ -106,7 +106,7 @@ class WorkflowOrchestrator:
             results["follow_up"] = follow_up_result
             case = VendorCase.query.get(case_id)
             trace.append(WorkflowOrchestrator._trace_stage(
-                "follow_up", state_before, case.current_state, follow_up_result,
+                case_id, "follow_up", state_before, case.current_state, follow_up_result,
                 started_at=stage_started_at, started_clock=stage_started_clock,
             ))
 
@@ -119,7 +119,7 @@ class WorkflowOrchestrator:
         }
 
     @staticmethod
-    def _trace_stage(stage, state_before, state_after, result, started_at=None, started_clock=None):
+    def _trace_stage(case_id, stage, state_before, state_after, result, started_at=None, started_clock=None):
         """Return a compact, timed execution trace without copying sensitive payloads."""
         completed_at = datetime.utcnow()
         status = result.get("status", "completed") if isinstance(result, dict) else "completed"
@@ -140,7 +140,7 @@ class WorkflowOrchestrator:
         logger.info(
             "Workflow stage completed: case_id=%s stage=%s status=%s "
             "state_before=%s state_after=%s duration_ms=%s",
-            getattr(result, "case_id", None) if not isinstance(result, dict) else "see_workflow_response",
+            case_id,
             stage,
             status,
             state_before,
