@@ -326,6 +326,13 @@ class WorkflowOrchestrator:
             decision_code=decision_code,
             recommended_procurement_action=recommended_action,
             decision_reasoning_summary=decision_reasoning,
+            decision_reason_codes=json.dumps(
+                safety_gate_result.get("reasons", [])
+                if safety_gate_result else []
+            ),
+            safety_gate_result=(
+                json.dumps(safety_gate_result) if safety_gate_result is not None else None
+            ),
             confidence_score=glm_result.get("confidence"),
         )
         db.session.add(decision)
