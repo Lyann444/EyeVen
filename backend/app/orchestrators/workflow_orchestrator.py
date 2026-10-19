@@ -207,10 +207,34 @@ class WorkflowOrchestrator:
         }
 
     @staticmethod
-    def _apply_safety_gate(case_id, decision_code, decision_reasoning, recommended_action):
-        """Veto an LLM approval recommendation when deterministic checks fail."""
+    def _apply_safety_gate(
+        case_id, decision_code, decision_reasoning, recommended_action, confidence
+    ):
+        """Veto approvals with weak LLM confidence or failed deterministic checks."""
         if decision_code != "complete_verified":
             return decision_code, decision_reasoning, recommended_action, None
+
+        # The routing prompt requires at least 0.8 confidence for a clearly
+        # evidence-supported decision. Enforce that rule in Python as well.
+        if confidence is None or confidence < 0.8:
+            gate_result = {
+                "allowed": False,
+                "suggested_decision": "manual_review_required",
+                "reasons": ["approval_confidence_below_threshold"],
+                "recoverable_fields": [],
+                "review_blockers": [],
+            }
+            decision_reasoning = (
+                decision_reasoning
+                + " | Safety gate blocked automatic approval: "
+                + "approval_confidence_below_threshold"
+            ).strip(" |")
+            return (
+                "manual_review_required",
+                decision_reasoning,
+                "Escalate for human review",
+                gate_result,
+            )
 
         gate_result = SafetyGate.evaluate(case_id)
         if gate_result["allowed"]:
@@ -272,6 +296,7 @@ class WorkflowOrchestrator:
             decision_code,
             decision_reasoning,
             recommended_action,
+            glm_result.get("confidence"),
         )
 
         latest_verification = VerificationRun.query.filter_by(
