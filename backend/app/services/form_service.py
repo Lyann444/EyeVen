@@ -31,7 +31,9 @@ class FormService:
             glm_result = GlmService.call_glm(
                 prompt=prompt,
                 response_schema=CANONICAL_FORM_SCHEMA,
-                max_tokens=4096,
+                # Canonical form output contains many fields and evidence excerpts.
+                # Allow a larger response so JSON is less likely to be cut off.
+                max_tokens=8192,
                 temperature=0.1,
             )
         except (GlmServiceError, GlmSchemaValidationError) as e:
@@ -164,9 +166,8 @@ class FormService:
                     existing.source_excerpt = evidence.get("source_excerpt")
             else:
                 evidence = field_data.get("evidence_reference") or {}
-                existing = EyeVenFormFieldValue(
+                new_field = EyeVenFormFieldValue(
                     vendor_case_id=case_id,
-                    section_name=field_data.get("section_name", "unknown"),
                     field_name=field_name,
                     field_label=field_data.get("field_label", field_name),
                     value_text=field_data.get("extracted_value"),
@@ -178,6 +179,4 @@ class FormService:
                     source_excerpt=evidence.get("source_excerpt"),
                     notes=field_data.get("notes"),
                 )
-                db.session.add(existing)
-
-        db.session.flush()
+                db.session.add(new_field)
