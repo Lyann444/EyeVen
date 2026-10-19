@@ -31,5 +31,8 @@ class RoutingDecision(db.Model):
     )
     recommended_procurement_action = db.Column(db.String(255), nullable=True)
     decision_reasoning_summary = db.Column(db.Text, nullable=False)
+    # JSON-encoded machine-readable safety-gate reason codes and result.
+    decision_reason_codes = db.Column(db.Text, nullable=True)
+    safety_gate_result = db.Column(db.Text, nullable=True)
     confidence_score = db.Column(db.Numeric(5, 4), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
