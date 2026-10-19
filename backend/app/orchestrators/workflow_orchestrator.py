@@ -51,12 +51,17 @@ class WorkflowOrchestrator:
             results["verification"] = ver_result
             case = VendorCase.query.get(case_id)
 
-        if case.current_state in ("verification_in_progress",):
+        # Verification and policy evaluation use distinct states so the
+        # workflow cannot accidentally skip policy evaluation after verification.
+        # Re-running from policy_review_in_progress retries policy evaluation
+        # instead of routing with potentially stale policy results.
+        if case.current_state in ("verification_completed", "policy_review_in_progress"):
             policy_result = WorkflowOrchestrator._run_policy_evaluation(case_id)
             results["policy_evaluation"] = policy_result
             case = VendorCase.query.get(case_id)
 
-        if case.current_state in ("policy_review_in_progress",):
+        # Routing only runs after policy evaluation has successfully completed.
+        if case.current_state == "routing_in_progress":
             routing_result = WorkflowOrchestrator._run_routing(case_id)
             results["routing"] = routing_result
             case = VendorCase.query.get(case_id)
@@ -107,7 +112,7 @@ class WorkflowOrchestrator:
         db.session.add(run)
 
         case.latest_verification_status = glm_result.get("legitimacy_status")
-        case.current_state = "policy_review_in_progress"
+        case.current_state = "verification_completed"
         db.session.commit()
 
         return {
@@ -157,7 +162,7 @@ class WorkflowOrchestrator:
 
         case.latest_policy_status = glm_result.get("risk_band")
         case.risk_band = glm_result.get("risk_band")
-        case.current_state = "policy_review_in_progress"
+        case.current_state = "routing_in_progress"
         db.session.commit()
 
         return {
