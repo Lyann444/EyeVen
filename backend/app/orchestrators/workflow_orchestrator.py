@@ -208,7 +208,7 @@ class WorkflowOrchestrator:
 
     @staticmethod
     def _apply_safety_gate(
-        case_id, decision_code, decision_reasoning, recommended_action, confidence
+        case_id, decision_code, decision_reasoning, recommended_action, confidence=None
     ):
         """Veto approvals with weak LLM confidence or failed deterministic checks."""
         if decision_code != "complete_verified":
