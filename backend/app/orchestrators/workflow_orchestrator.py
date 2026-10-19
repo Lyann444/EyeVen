@@ -328,7 +328,10 @@ class WorkflowOrchestrator:
             decision_reasoning_summary=decision_reasoning,
             decision_reason_codes=json.dumps(
                 safety_gate_result.get("reasons", [])
-                if safety_gate_result else []
+                if safety_gate_result and safety_gate_result.get("reasons")
+                else ["safety_gate_passed"]
+                if safety_gate_result and safety_gate_result.get("allowed")
+                else ["routing_decision:" + str(decision_code)]
             ),
             safety_gate_result=(
                 json.dumps(safety_gate_result) if safety_gate_result is not None else None
