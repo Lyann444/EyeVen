@@ -39,44 +39,77 @@ class WorkflowOrchestrator:
             return {"case_id": case_id, "status": "already_terminal", "current_state": case.current_state}
 
         results = {}
+        trace = []
 
         if case.current_state in ("intake_classified", "procurement_form_detected", "procurement_form_missing",
                                    "intake_received", "uploaded", "extracting"):
+            state_before = case.current_state
             form_result = FormService.structure_form(case_id)
             results["form_structuring"] = form_result
             case = VendorCase.query.get(case_id)
+            trace.append(WorkflowOrchestrator._trace_stage(
+                "form_structuring", state_before, case.current_state, form_result
+            ))
 
         if case.current_state in ("field_alignment_completed", "incomplete_after_autofill",
                                    "form_comparison_in_progress", "form_auto_fill_in_progress"):
+            state_before = case.current_state
             ver_result = WorkflowOrchestrator._run_verification(case_id)
             results["verification"] = ver_result
             case = VendorCase.query.get(case_id)
+            trace.append(WorkflowOrchestrator._trace_stage(
+                "verification", state_before, case.current_state, ver_result
+            ))
 
         # Verification and policy evaluation use distinct states so the
         # workflow cannot accidentally skip policy evaluation after verification.
         # Re-running from policy_review_in_progress retries policy evaluation
         # instead of routing with potentially stale policy results.
         if case.current_state in ("verification_completed", "policy_review_in_progress"):
+            state_before = case.current_state
             policy_result = WorkflowOrchestrator._run_policy_evaluation(case_id)
             results["policy_evaluation"] = policy_result
             case = VendorCase.query.get(case_id)
+            trace.append(WorkflowOrchestrator._trace_stage(
+                "policy_evaluation", state_before, case.current_state, policy_result
+            ))
 
         # Routing only runs after policy evaluation has successfully completed.
         if case.current_state == "routing_in_progress":
+            state_before = case.current_state
             routing_result = WorkflowOrchestrator._run_routing(case_id)
             results["routing"] = routing_result
             case = VendorCase.query.get(case_id)
+            trace.append(WorkflowOrchestrator._trace_stage(
+                "routing", state_before, case.current_state, routing_result
+            ))
 
         if case.current_state == "pending_follow_up":
+            state_before = case.current_state
             follow_up_result = WorkflowOrchestrator._run_follow_up(case_id)
             results["follow_up"] = follow_up_result
             case = VendorCase.query.get(case_id)
+            trace.append(WorkflowOrchestrator._trace_stage(
+                "follow_up", state_before, case.current_state, follow_up_result
+            ))
 
         return {
             "case_id": case_id,
             "current_state": case.current_state,
             "stages_run": list(results.keys()),
             "results": results,
+            "trace": trace,
+        }
+
+    @staticmethod
+    def _trace_stage(stage, state_before, state_after, result):
+        """Return a compact execution trace without copying sensitive payloads."""
+        status = result.get("status", "completed") if isinstance(result, dict) else "completed"
+        return {
+            "stage": stage,
+            "state_before": state_before,
+            "state_after": state_after,
+            "status": status,
         }
 
     @staticmethod
