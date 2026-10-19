@@ -56,6 +56,23 @@ class WorkflowOrchestrationTests(unittest.TestCase):
             result["stages_run"], ["policy_evaluation", "routing"]
         )
         self.assertEqual(result["current_state"], "completed")
+        self.assertEqual(
+            result["trace"],
+            [
+                {
+                    "stage": "policy_evaluation",
+                    "state_before": "verification_completed",
+                    "state_after": "routing_in_progress",
+                    "status": "completed",
+                },
+                {
+                    "stage": "routing",
+                    "state_before": "routing_in_progress",
+                    "state_after": "completed",
+                    "status": "completed",
+                },
+            ],
+        )
 
     def test_policy_failure_state_prevents_routing(self):
         def policy_failure(case_id):
@@ -75,6 +92,10 @@ class WorkflowOrchestrationTests(unittest.TestCase):
         routing.assert_not_called()
         self.assertEqual(result["stages_run"], ["policy_evaluation"])
         self.assertEqual(result["current_state"], "manual_review_required")
+        self.assertEqual(result["trace"][0]["status"], "glm_failed")
+        self.assertEqual(
+            result["trace"][0]["state_after"], "manual_review_required"
+        )
 
     def test_verification_success_flows_into_policy_then_routing(self):
         self.case.current_state = "field_alignment_completed"
@@ -120,6 +141,10 @@ class WorkflowOrchestrationTests(unittest.TestCase):
             ["verification", "policy_evaluation", "routing"],
         )
         self.assertEqual(result["current_state"], "completed")
+        self.assertEqual(
+            [entry["stage"] for entry in result["trace"]],
+            ["verification", "policy_evaluation", "routing"],
+        )
 
     def test_terminal_case_does_not_run_any_stage(self):
         self.case.current_state = "completed"
@@ -136,6 +161,7 @@ class WorkflowOrchestrationTests(unittest.TestCase):
         routing.assert_not_called()
         self.assertEqual(result["status"], "already_terminal")
         self.assertEqual(result["current_state"], "completed")
+        self.assertNotIn("trace", result)
 
 
 if __name__ == "__main__":
