@@ -81,6 +81,26 @@ class RoutingFieldEvidenceTests(unittest.TestCase):
         self.assertTrue(result["unresolved_fields"][0]["value_present"])
         self.assertTrue(result["unresolved_fields"][0]["evidence_excerpt_available"])
 
+
+    def test_routing_prompt_formats_with_structured_evidence_context(self):
+        from app.prompts.routing import ROUTING_PROMPT
+
+        context = {
+            "completeness_report": "{}",
+            "verification_report": "{}",
+            "policy_report": "{}",
+            "field_evidence_report": '{"unresolved_field_count": 1}',
+            "risk_band": "low",
+            "recoverable_issues": 1,
+            "blocking_issues": 0,
+        }
+
+        rendered = ROUTING_PROMPT.format(**context)
+
+        self.assertIn("STRUCTURED FIELD EVIDENCE REPORT:", rendered)
+        self.assertIn('"unresolved_field_count": 1', rendered)
+        self.assertIn("deterministic safety gate remains authoritative", rendered.lower())
+
     def test_empty_fields_return_empty_summary(self):
         self.assertEqual(
             ContextAssembler._routing_field_evidence([]),
