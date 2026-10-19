@@ -11,25 +11,18 @@ const UploadCasePage: React.FC = () => {
   const navigate = useNavigate();
   const [files, setFiles] = useState<FileList | null>(null);
   const [emailContent, setEmailContent] = useState('');
-  const [caseReference, setCaseReference] = useState('');
   const [vendorName, setVendorName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
   const handleSubmit = async () => {
-    if (!caseReference.trim()) {
-      setError('Case reference is required');
-      return;
-    }
-
     setLoading(true);
     setError('');
     setSuccess('');
 
     try {
       const createRes = await caseService.createCase({
-        case_reference: caseReference,
         vendor_display_name: vendorName || null,
         intake_type: 'procurement_form_absent',
       });
@@ -49,7 +42,8 @@ const UploadCasePage: React.FC = () => {
         });
       }
 
-      setSuccess(`Case ${caseReference} created successfully`);
+      const generatedReference = createRes.data.case_reference;
+      setSuccess(`Case ${generatedReference} created successfully`);
       setTimeout(() => navigate(`/cases/${newCaseId}`), 1500);
     } catch (e: any) {
       setError(e?.response?.data?.error || 'Failed to create case');
@@ -65,15 +59,9 @@ const UploadCasePage: React.FC = () => {
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>Case Information</Typography>
-          <TextField
-            label="Case Reference *"
-            value={caseReference}
-            onChange={e => setCaseReference(e.target.value)}
-            fullWidth
-            sx={{ mb: 2 }}
-            placeholder="e.g., EV-2026-001"
-            helperText="Unique tracking ID for this vendor submission. Use an existing reference only when continuing that same case; each new submission needs a unique reference."
-          />
+          <Alert severity="info" sx={{ mb: 2 }}>
+            EyeVen will generate a unique case reference automatically when you create this submission.
+          </Alert>
           <TextField
             label="Vendor Display Name"
             value={vendorName}
