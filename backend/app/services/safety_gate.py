@@ -1,3 +1,5 @@
+import json
+
 from app.models import (
     EyeVenFormFieldValue,
     PolicyEvaluationRun,
@@ -75,6 +77,25 @@ class SafetyGate:
                 reasons.append("policy_risk_not_low:" + str(policy.risk_band))
             if policy.blocking_issue_count != 0:
                 reasons.append("policy_blocking_issues_present")
+
+            # Cross-check the count against persisted risk flags so an
+            # inconsistent model output cannot hide a blocking flag.
+            raw_risk_flags = getattr(policy, "risk_flags", "[]")
+            try:
+                risk_flags = (
+                    json.loads(raw_risk_flags)
+                    if isinstance(raw_risk_flags, str)
+                    else raw_risk_flags
+                )
+                if not isinstance(risk_flags, list):
+                    raise ValueError("risk_flags must be a list")
+                if any(
+                    isinstance(flag, dict) and flag.get("severity") == "blocking"
+                    for flag in risk_flags
+                ):
+                    reasons.append("blocking_risk_flag_present")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                reasons.append("policy_risk_flags_malformed")
 
         if not fields:
             reasons.append("no_form_field_evidence_available")
