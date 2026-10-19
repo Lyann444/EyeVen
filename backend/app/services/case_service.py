@@ -1,3 +1,6 @@
+from datetime import datetime
+from uuid import uuid4
+
 from app.extensions import db
 from app.models import (
     VendorCase, EyeVenFormFieldValue, UploadedFile,
@@ -11,8 +14,11 @@ from app.orchestrators.reprocessing_orchestrator import ReprocessingOrchestrator
 class CaseService:
     @staticmethod
     def create_case(data):
+        # Use a temporary unique value to obtain the database ID, then derive
+        # a human-readable reference from that ID. Existing case references
+        # are never changed.
         case = VendorCase(
-            case_reference=data["case_reference"],
+            case_reference=f"TEMP-{uuid4().hex}",
             vendor_display_name=data.get("vendor_display_name"),
             intake_type=data["intake_type"],
             registration_type=data.get("registration_type"),
@@ -21,6 +27,12 @@ class CaseService:
         )
         db.session.add(case)
         db.session.flush()
+
+        generated_reference = f"EV-{datetime.utcnow().year}-{case.id:06d}"
+        # Protect legacy databases where a user may already have used this format.
+        if VendorCase.query.filter_by(case_reference=generated_reference).first():
+            generated_reference = f"{generated_reference}-{uuid4().hex[:6].upper()}"
+        case.case_reference = generated_reference
 
         CaseService._seed_form_fields(case.id)
 
