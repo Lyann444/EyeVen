@@ -2,7 +2,6 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from app.models import VendorCase
 from app.orchestrators.workflow_orchestrator import WorkflowOrchestrator
 
 
@@ -16,7 +15,12 @@ class WorkflowOrchestrationTests(unittest.TestCase):
             get_or_404=Mock(return_value=self.case),
             get=Mock(return_value=self.case),
         )
-        self.query_patch = patch.object(VendorCase, "query", self.case_query)
+        # Patch the orchestrator module symbol instead of VendorCase.query:
+        # Flask-SQLAlchemy resolves the query descriptor only inside an app context.
+        self.query_patch = patch(
+            "app.orchestrators.workflow_orchestrator.VendorCase",
+            new=SimpleNamespace(query=self.case_query),
+        )
         self.query_patch.start()
         self.addCleanup(self.query_patch.stop)
 
