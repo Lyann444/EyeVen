@@ -52,28 +52,43 @@ const CaseDetailPage: React.FC = () => {
 
   useEffect(() => {
     const load = async () => {
-      if (!caseId) return;
-      try {
-        const id = parseInt(caseId);
-        const [c, fa, v, p, r, a] = await Promise.all([
-          caseService.getCaseDetail(id),
-          apiClient.get(`/workflow/${id}/form-alignment`),
-          caseService.getVerification(id),
-          caseService.getPolicy(id),
-          caseService.getRouting(id),
-          auditService.getAuditTrail(id),
-        ]);
-        setCaseData(c.data);
-        setFormFields(fa.data?.fields || []);
-        setVerification(v.data);
-        setPolicy(p.data);
-        setRouting(r.data);
-        setAudit(a.data);
-      } catch (e) {
-        console.error('Failed to load case', e);
-      } finally {
+      if (!caseId || !/^\\d+$/.test(caseId)) {
+        setCaseData(null);
         setLoading(false);
+        return;
       }
+      const id = Number(caseId);
+      try {
+        // Load the case itself separately. A failed secondary panel (e.g. audit)
+        // must not make an existing case appear to be missing.
+        const caseResponse = await caseService.getCaseDetail(id);
+        setCaseData(caseResponse.data);
+      } catch (e) {
+        console.error('Failed to load case details', e);
+        setCaseData(null);
+        setLoading(false);
+        return;
+      }
+
+      const results = await Promise.allSettled([
+        apiClient.get(`/workflow/${id}/form-alignment`),
+        caseService.getVerification(id),
+        caseService.getPolicy(id),
+        caseService.getRouting(id),
+        auditService.getAuditTrail(id),
+      ]);
+      const [fa, v, p, r, a] = results;
+      if (fa.status === 'fulfilled') setFormFields(fa.value.data?.fields || []);
+      else console.error('Failed to load form alignment', fa.reason);
+      if (v.status === 'fulfilled') setVerification(v.value.data);
+      else console.error('Failed to load verification', v.reason);
+      if (p.status === 'fulfilled') setPolicy(p.value.data);
+      else console.error('Failed to load policy', p.reason);
+      if (r.status === 'fulfilled') setRouting(r.value.data);
+      else console.error('Failed to load routing', r.reason);
+      if (a.status === 'fulfilled') setAudit(a.value.data);
+      else console.error('Failed to load audit trail', a.reason);
+      setLoading(false);
     };
     load();
   }, [caseId]);
