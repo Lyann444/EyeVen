@@ -21,6 +21,7 @@ class WorkflowSafetyGateTests(unittest.TestCase):
                 "complete_verified",
                 "Vendor appears eligible.",
                 "Approve vendor",
+                0.95,
             )
         )
 
@@ -55,6 +56,42 @@ class WorkflowSafetyGateTests(unittest.TestCase):
         self.assertEqual(action, "Approve vendor")
         self.assertTrue(gate_result["allowed"])
         evaluate.assert_called_once_with(42)
+
+
+    @patch("app.orchestrators.workflow_orchestrator.SafetyGate.evaluate")
+    def test_low_confidence_approval_is_forced_to_manual_review(self, evaluate):
+        decision, reasoning, action, gate_result = (
+            WorkflowOrchestrator._apply_safety_gate(
+                42,
+                "complete_verified",
+                "Vendor appears eligible.",
+                "Approve vendor",
+                0.62,
+            )
+        )
+
+        self.assertEqual(decision, "manual_review_required")
+        self.assertIn("approval_confidence_below_threshold", reasoning)
+        self.assertEqual(action, "Escalate for human review")
+        self.assertFalse(gate_result["allowed"])
+        evaluate.assert_not_called()
+
+    @patch("app.orchestrators.workflow_orchestrator.SafetyGate.evaluate")
+    def test_missing_confidence_is_forced_to_manual_review(self, evaluate):
+        decision, _, action, gate_result = (
+            WorkflowOrchestrator._apply_safety_gate(
+                42,
+                "complete_verified",
+                "Vendor appears eligible.",
+                "Approve vendor",
+                None,
+            )
+        )
+
+        self.assertEqual(decision, "manual_review_required")
+        self.assertEqual(action, "Escalate for human review")
+        self.assertIn("approval_confidence_below_threshold", gate_result["reasons"])
+        evaluate.assert_not_called()
 
     @patch("app.orchestrators.workflow_orchestrator.SafetyGate.evaluate")
     def test_non_approval_decision_does_not_call_gate(self, evaluate):
