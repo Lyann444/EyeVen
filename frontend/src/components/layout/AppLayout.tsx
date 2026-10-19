@@ -5,6 +5,7 @@ import {
 } from '@mui/material';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import UploadIcon from '@mui/icons-material/Upload';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 
 const AppLayout: React.FC = () => {
   const navigate = useNavigate();
@@ -25,6 +26,15 @@ const AppLayout: React.FC = () => {
             variant={location.pathname === '/' ? 'outlined' : 'text'}
           >
             Dashboard
+          </Button>
+          <Button
+            color="inherit"
+            startIcon={<FolderOpenIcon />}
+            onClick={() => navigate('/cases')}
+            sx={{ mr: 1, textTransform: 'none' }}
+            variant={location.pathname.startsWith('/cases') ? 'outlined' : 'text'}
+          >
+            Case History
           </Button>
           <Button
             color="inherit"
