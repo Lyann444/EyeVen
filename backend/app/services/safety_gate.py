@@ -37,6 +37,21 @@ class SafetyGate:
         "company_chop_present",
     }
 
+    # High-impact identity and payment fields need corroboration, not merely
+    # a value copied from the submitted form.
+    EVIDENCE_REQUIRED_FIELDS = {
+        "company_registered_name",
+        "company_registered_number",
+        "company_registered_address",
+        "bank_name",
+        "bank_account_name",
+        "bank_account_number",
+    }
+    ACCEPTABLE_EVIDENCE_STATUSES = {
+        "matched_with_evidence",
+        "filled_from_supporting_docs",
+    }
+
     # Additional fields required only when the condition applies.
     CONDITIONAL_FIELDS = {
         "current_vendor_number": "re_registration",
@@ -186,6 +201,15 @@ class SafetyGate:
             value = SafetyGate._field_value(field)
             if status in SafetyGate.RECOVERABLE_FIELD_STATUSES or not value:
                 recoverable_gaps.append(field_name)
+
+            if (
+                field_name in SafetyGate.EVIDENCE_REQUIRED_FIELDS
+                and value
+                and status not in SafetyGate.ACCEPTABLE_EVIDENCE_STATUSES
+            ):
+                review_blockers.append(
+                    field_name + ":evidence_not_corroborated:" + str(status)
+                )
 
         # Known contradictions or unreliable evidence block approval even when
         # the affected field is not in the required-field list.
