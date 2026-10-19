@@ -177,6 +177,8 @@ CREATE TABLE routing_decisions (
     decision_code               ENUM('complete_verified','follow_up_required','flagged_high_risk','rejected','manual_review_required') NOT NULL,
     recommended_procurement_action VARCHAR(255) NULL,
     decision_reasoning_summary  TEXT        NOT NULL,
+    decision_reason_codes      LONGTEXT    NULL,
+    safety_gate_result         LONGTEXT    NULL,
     confidence_score            DECIMAL(5,4) NULL,
     created_at                  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
