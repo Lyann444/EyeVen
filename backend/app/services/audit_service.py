@@ -1,3 +1,5 @@
+import json
+
 from app.models import (
     VendorCase,
     VerificationRun,
@@ -9,6 +11,26 @@ from app.models import (
 
 
 class AuditService:
+    @staticmethod
+    def _parse_json_list(value):
+        if not value:
+            return []
+        try:
+            parsed = json.loads(value) if isinstance(value, str) else value
+            return parsed if isinstance(parsed, list) else []
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+
+    @staticmethod
+    def _parse_json_object(value):
+        if not value:
+            return None
+        try:
+            parsed = json.loads(value) if isinstance(value, str) else value
+            return parsed if isinstance(parsed, dict) else None
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+
     @staticmethod
     def get_audit_trail(case_id):
         case = VendorCase.query.get_or_404(case_id)
@@ -64,7 +86,14 @@ class AuditService:
                     "id": r.id,
                     "decision_code": r.decision_code,
                     "reasoning_summary": r.decision_reasoning_summary,
-                    "confidence_score": float(r.confidence_score) if r.confidence_score else None,
+                    "decision_reason_codes": AuditService._parse_json_list(
+                        getattr(r, "decision_reason_codes", None)
+                    ),
+                    "safety_gate_result": AuditService._parse_json_object(
+                        getattr(r, "safety_gate_result", None)
+                    ),
+                    "recommended_procurement_action": r.recommended_procurement_action,
+                    "confidence_score": float(r.confidence_score) if r.confidence_score is not None else None,
                     "created_at": r.created_at.isoformat() if r.created_at else None,
                 }
                 for r in routings
