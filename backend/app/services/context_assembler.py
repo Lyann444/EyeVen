@@ -13,6 +13,54 @@ from app.services.external_verification_service import ExternalVerificationServi
 
 
 class ContextAssembler:
+    ROUTING_REVIEW_STATUSES = {
+        "missing",
+        "conflicting",
+        "unverifiable",
+        "low_confidence",
+        "declaration_missing",
+        "mismatched_with_evidence",
+    }
+
+    @staticmethod
+    def _routing_field_evidence(fields) -> dict:
+        """Build a compact, structured summary of unresolved field evidence.
+
+        Values and source excerpts are intentionally omitted here to reduce
+        unnecessary exposure of vendor PII in the routing prompt.
+        """
+        status_counts = {}
+        unresolved_fields = []
+
+        for field in fields:
+            status = field.status or "unknown"
+            status_counts[status] = status_counts.get(status, 0) + 1
+            if status in ContextAssembler.ROUTING_REVIEW_STATUSES:
+                unresolved_fields.append({
+                    "field_name": field.field_name,
+                    "status": status,
+                    "value_present": bool(
+                        (field.normalized_value_text or field.value_text or "").strip()
+                    ),
+                    "value_source": field.value_source,
+                    "source_file_available": field.source_file_id is not None,
+                    "evidence_excerpt_available": bool(
+                        (field.source_excerpt or "").strip()
+                    ),
+                    "confidence_score": (
+                        float(field.confidence_score)
+                        if field.confidence_score is not None else None
+                    ),
+                })
+
+        return {
+            "field_status_counts": status_counts,
+            "unresolved_field_count": len(unresolved_fields),
+            "unresolved_fields": sorted(
+                unresolved_fields, key=lambda item: item["field_name"]
+            ),
+        }
+
     @staticmethod
     def intake_classification(case_id: int) -> dict:
         case = VendorCase.query.get_or_404(case_id)
@@ -189,10 +237,15 @@ class ContextAssembler:
                 "risk_flags": latest_policy.risk_flags,
             }, indent=2)
 
+        field_evidence_report = json.dumps(
+            ContextAssembler._routing_field_evidence(fields), indent=2
+        )
+
         return {
             "completeness_report": json.dumps(completeness, indent=2),
             "verification_report": verification_report,
             "policy_report": policy_report,
+            "field_evidence_report": field_evidence_report,
             "risk_band": latest_policy.risk_band if latest_policy else "unknown",
             "recoverable_issues": latest_policy.recoverable_issue_count if latest_policy else 0,
             "blocking_issues": latest_policy.blocking_issue_count if latest_policy else 0,
