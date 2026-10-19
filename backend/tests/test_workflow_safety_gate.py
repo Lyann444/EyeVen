@@ -48,6 +48,7 @@ class WorkflowSafetyGateTests(unittest.TestCase):
                 "complete_verified",
                 "All checks passed.",
                 "Approve vendor",
+                0.95,
             )
         )
 
@@ -129,6 +130,7 @@ class WorkflowSafetyGateTests(unittest.TestCase):
                 "complete_verified",
                 "Vendor appears eligible.",
                 "Approve vendor",
+                0.95,
             )
         )
 
