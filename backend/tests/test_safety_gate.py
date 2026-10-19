@@ -188,6 +188,48 @@ class SafetyGateTests(unittest.TestCase):
 
         self.assertTrue(result["allowed"])
 
+
+    def test_other_business_type_requires_details(self):
+        fields = complete_fields()
+        business_type = next(
+            item for item in fields if item.field_name == "business_type"
+        )
+        business_type.value_text = "other"
+        business_type.normalized_value_text = "other"
+
+        result = SafetyGate.evaluate_results(verification(), policy(), fields)
+
+        self.assertFalse(result["allowed"])
+        self.assertIn("business_type_other", result["recoverable_fields"])
+
+    def test_dispute_details_required_when_disputes_declared(self):
+        fields = complete_fields()
+        disputes = next(
+            item for item in fields
+            if item.field_name == "legal_disputes_past_5_years"
+        )
+        disputes.value_text = "yes"
+        disputes.normalized_value_text = "yes"
+
+        result = SafetyGate.evaluate_results(verification(), policy(), fields)
+
+        self.assertFalse(result["allowed"])
+        self.assertIn("legal_disputes_details", result["recoverable_fields"])
+
+    def test_outsourcing_details_required_when_outsourcing_declared(self):
+        fields = complete_fields()
+        outsourcing = next(
+            item for item in fields
+            if item.field_name == "outsource_any_part_of_services"
+        )
+        outsourcing.value_text = "yes"
+        outsourcing.normalized_value_text = "yes"
+
+        result = SafetyGate.evaluate_results(verification(), policy(), fields)
+
+        self.assertFalse(result["allowed"])
+        self.assertIn("outsourcing_details", result["recoverable_fields"])
+
     def test_unknown_registration_type_fails_closed(self):
         result = SafetyGate.evaluate_results(
             verification(),
