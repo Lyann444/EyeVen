@@ -10,7 +10,7 @@ class SafetyGate:
     """Deterministic veto for automatic vendor approval.
 
     This gate does not decide that a vendor is legitimate. It only determines
-    whether the persisted results are sufficient to allow automatic approval.
+    whether persisted results are sufficient to allow automatic approval.
     """
 
     RECOVERABLE_FIELD_STATUSES = {"missing", "declaration_missing"}
@@ -23,7 +23,8 @@ class SafetyGate:
 
     @staticmethod
     def evaluate(case_id: int) -> dict:
-        case = VendorCase.query.get_or_404(case_id)
+        """Load persisted case evidence and evaluate the approval rules."""
+        VendorCase.query.get_or_404(case_id)
         verification = (
             VerificationRun.query.filter_by(vendor_case_id=case_id)
             .order_by(VerificationRun.created_at.desc())
@@ -38,6 +39,11 @@ class SafetyGate:
             vendor_case_id=case_id
         ).all()
 
+        return SafetyGate.evaluate_results(verification, policy, fields)
+
+    @staticmethod
+    def evaluate_results(verification, policy, fields) -> dict:
+        """Pure rule evaluation separated from database access for unit tests."""
         reasons = []
         recoverable_gaps = []
         review_blockers = []
