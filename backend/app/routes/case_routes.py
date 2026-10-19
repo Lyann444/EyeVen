@@ -7,8 +7,10 @@ case_bp = Blueprint("case_routes", __name__)
 @case_bp.route("", methods=["POST"])
 def create_case():
     data = request.get_json(silent=True)
-    if not data or "case_reference" not in data:
-        return jsonify({"error": "case_reference is required"}), 400
+    if not data:
+        return jsonify({"error": "A JSON request body is required"}), 400
+    if not data.get("intake_type"):
+        return jsonify({"error": "intake_type is required"}), 400
     try:
         result = CaseService.create_case(data)
         return jsonify(result), 201
