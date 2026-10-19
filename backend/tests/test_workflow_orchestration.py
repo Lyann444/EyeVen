@@ -57,22 +57,34 @@ class WorkflowOrchestrationTests(unittest.TestCase):
         )
         self.assertEqual(result["current_state"], "completed")
         self.assertEqual(
-            result["trace"],
             [
-                {
-                    "stage": "policy_evaluation",
-                    "state_before": "verification_completed",
-                    "state_after": "routing_in_progress",
-                    "status": "completed",
-                },
-                {
-                    "stage": "routing",
-                    "state_before": "routing_in_progress",
-                    "state_after": "completed",
-                    "status": "completed",
-                },
+                (
+                    entry["stage"],
+                    entry["state_before"],
+                    entry["state_after"],
+                    entry["status"],
+                )
+                for entry in result["trace"]
+            ],
+            [
+                (
+                    "policy_evaluation",
+                    "verification_completed",
+                    "routing_in_progress",
+                    "completed",
+                ),
+                (
+                    "routing",
+                    "routing_in_progress",
+                    "completed",
+                    "completed",
+                ),
             ],
         )
+        for entry in result["trace"]:
+            self.assertIsInstance(entry["started_at"], str)
+            self.assertIsInstance(entry["completed_at"], str)
+            self.assertGreaterEqual(entry["duration_ms"], 0)
 
     def test_policy_failure_state_prevents_routing(self):
         def policy_failure(case_id):
