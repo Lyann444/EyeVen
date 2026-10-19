@@ -52,7 +52,7 @@ const CaseDetailPage: React.FC = () => {
 
   useEffect(() => {
     const load = async () => {
-      if (!caseId || !/^\\d+$/.test(caseId)) {
+      if (!caseId || !/^\d+$/.test(caseId)) {
         setCaseData(null);
         setLoading(false);
         return;
