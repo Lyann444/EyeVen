@@ -64,6 +64,16 @@ VERIFICATION REPORT:
 POLICY REPORT:
 {policy_report}
 
+STRUCTURED FIELD EVIDENCE REPORT:
+{field_evidence_report}
+
+EVIDENCE INTERPRETATION RULES:
+- Treat the structured field evidence report as a summary of stored field statuses, not proof that a field is correct.
+- A field with value_present=true may still be unresolved if its status indicates conflict, mismatch, low confidence, or unverifiability.
+- Do not infer that evidence is corroborated merely because a value is present.
+- If required evidence is unresolved or contradictory, do not recommend automatic completion.
+- The deterministic safety gate remains authoritative and may override an approval recommendation.
+
 RISK BAND:
 {risk_band}
 
