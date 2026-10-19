@@ -20,40 +20,71 @@ def policy(risk_band="low", blocking_issue_count=0, risk_flags="[]"):
     )
 
 
-def field(name="registration_number", status="matched_with_evidence"):
-    return SimpleNamespace(field_name=name, status=status)
+def make_field(name, status="matched_with_evidence", value="test-value"):
+    return SimpleNamespace(
+        field_name=name,
+        status=status,
+        value_text=value,
+        normalized_value_text=value,
+    )
+
+
+def complete_fields():
+    """Build a minimal case fixture satisfying the proposed demo policy."""
+    fields = [
+        make_field(name)
+        for name in SafetyGate.REQUIRED_FIELDS
+    ]
+    # These declarations control whether extra conditional fields are required.
+    overrides = {
+        "business_type": "services",
+        "legal_disputes_past_5_years": "no",
+        "outsource_any_part_of_services": "no",
+    }
+    for name, value in overrides.items():
+        existing = next(item for item in fields if item.field_name == name)
+        existing.value_text = value
+        existing.normalized_value_text = value
+    return fields
 
 
 class SafetyGateTests(unittest.TestCase):
     def test_all_checks_pass_allows_approval(self):
         result = SafetyGate.evaluate_results(
-            verification(), policy(), [field()]
+            verification(), policy(), complete_fields()
         )
 
         self.assertTrue(result["allowed"])
         self.assertEqual(result["suggested_decision"], "complete_verified")
         self.assertEqual(result["reasons"], [])
 
-    def test_missing_information_requires_follow_up(self):
-        result = SafetyGate.evaluate_results(
-            verification(), policy(), [field(status="missing")]
+    def test_missing_required_information_requires_follow_up(self):
+        fields = complete_fields()
+        bank_account = next(
+            item for item in fields if item.field_name == "bank_account_number"
         )
+        bank_account.status = "missing"
+        bank_account.value_text = None
+        bank_account.normalized_value_text = None
+
+        result = SafetyGate.evaluate_results(verification(), policy(), fields)
 
         self.assertFalse(result["allowed"])
         self.assertEqual(result["suggested_decision"], "follow_up_required")
-        self.assertIn("unresolved_required_information", result["reasons"])
+        self.assertIn("bank_account_number", result["recoverable_fields"])
 
     def test_conflicting_evidence_requires_manual_review(self):
-        result = SafetyGate.evaluate_results(
-            verification(), policy(), [field(status="conflicting")]
-        )
+        fields = complete_fields()
+        fields.append(make_field("company_website", status="conflicting"))
+
+        result = SafetyGate.evaluate_results(verification(), policy(), fields)
 
         self.assertFalse(result["allowed"])
         self.assertEqual(result["suggested_decision"], "manual_review_required")
 
     def test_high_risk_case_cannot_be_auto_approved(self):
         result = SafetyGate.evaluate_results(
-            verification(), policy(risk_band="high"), [field()]
+            verification(), policy(risk_band="high"), complete_fields()
         )
 
         self.assertFalse(result["allowed"])
@@ -61,7 +92,7 @@ class SafetyGateTests(unittest.TestCase):
 
     def test_missing_policy_result_fails_closed(self):
         result = SafetyGate.evaluate_results(
-            verification(), None, [field()]
+            verification(), None, complete_fields()
         )
 
         self.assertFalse(result["allowed"])
@@ -70,7 +101,7 @@ class SafetyGateTests(unittest.TestCase):
 
     def test_blocking_policy_issue_prevents_approval(self):
         result = SafetyGate.evaluate_results(
-            verification(), policy(blocking_issue_count=1), [field()]
+            verification(), policy(blocking_issue_count=1), complete_fields()
         )
 
         self.assertFalse(result["allowed"])
@@ -78,17 +109,25 @@ class SafetyGateTests(unittest.TestCase):
 
     def test_moderate_mismatch_prevents_approval(self):
         result = SafetyGate.evaluate_results(
-            verification(severity="moderate"), policy(), [field()]
+            verification(severity="moderate"), policy(), complete_fields()
         )
 
         self.assertFalse(result["allowed"])
         self.assertEqual(result["suggested_decision"], "manual_review_required")
 
+    def test_missing_mismatch_severity_fails_closed(self):
+        result = SafetyGate.evaluate_results(
+            verification(severity=None), policy(), complete_fields()
+        )
+
+        self.assertFalse(result["allowed"])
+        self.assertIn("mismatch_severity_missing_or_unknown", result["reasons"])
+
     def test_blocking_flag_prevents_approval_even_if_count_is_zero(self):
         result = SafetyGate.evaluate_results(
             verification(),
             policy(risk_flags='[{"severity":"blocking","flag_type":"identity_verification_gap"}]'),
-            [field()],
+            complete_fields(),
         )
 
         self.assertFalse(result["allowed"])
@@ -96,11 +135,69 @@ class SafetyGateTests(unittest.TestCase):
 
     def test_malformed_risk_flags_fail_closed(self):
         result = SafetyGate.evaluate_results(
-            verification(), policy(risk_flags="not-json"), [field()]
+            verification(), policy(risk_flags="not-json"), complete_fields()
         )
 
         self.assertFalse(result["allowed"])
         self.assertIn("policy_risk_flags_malformed", result["reasons"])
+
+    def test_missing_optional_field_does_not_block_approval(self):
+        fields = complete_fields()
+        fields.append(make_field("company_website", status="missing", value=""))
+
+        result = SafetyGate.evaluate_results(verification(), policy(), fields)
+
+        self.assertTrue(result["allowed"])
+
+    def test_re_registration_requires_current_vendor_number(self):
+        fields = complete_fields()
+        fields.append(
+            make_field("current_vendor_number", status="missing", value="")
+        )
+
+        result = SafetyGate.evaluate_results(
+            verification(), policy(), fields, registration_type="re_registration"
+        )
+
+        self.assertFalse(result["allowed"])
+        self.assertIn("current_vendor_number", result["recoverable_fields"])
+
+    def test_iso_details_required_when_certification_is_available(self):
+        fields = complete_fields()
+        fields.extend([
+            make_field("iso_certification_available", value="yes"),
+            make_field("iso_certification_number", status="missing", value=""),
+            make_field("iso_certification_expiry_date", status="missing", value=""),
+        ])
+
+        result = SafetyGate.evaluate_results(verification(), policy(), fields)
+
+        self.assertFalse(result["allowed"])
+        self.assertIn("iso_certification_number", result["recoverable_fields"])
+        self.assertIn("iso_certification_expiry_date", result["recoverable_fields"])
+
+    def test_iso_details_not_required_when_certification_is_unavailable(self):
+        fields = complete_fields()
+        fields.extend([
+            make_field("iso_certification_available", value="no"),
+            make_field("iso_certification_number", status="missing", value=""),
+            make_field("iso_certification_expiry_date", status="missing", value=""),
+        ])
+
+        result = SafetyGate.evaluate_results(verification(), policy(), fields)
+
+        self.assertTrue(result["allowed"])
+
+    def test_unknown_registration_type_fails_closed(self):
+        result = SafetyGate.evaluate_results(
+            verification(),
+            policy(),
+            complete_fields(),
+            registration_type=None,
+        )
+
+        self.assertFalse(result["allowed"])
+        self.assertIn("registration_type", result["recoverable_fields"])
 
 
 if __name__ == "__main__":
