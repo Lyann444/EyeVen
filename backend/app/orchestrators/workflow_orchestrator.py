@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 from datetime import datetime
 
 from app.extensions import db
@@ -216,18 +217,30 @@ class WorkflowOrchestrator:
 
         # The routing prompt requires at least 0.8 confidence for a clearly
         # evidence-supported decision. Enforce that rule in Python as well.
-        if confidence is None or confidence < 0.8:
+        confidence_is_valid = (
+            isinstance(confidence, (int, float))
+            and not isinstance(confidence, bool)
+            and math.isfinite(confidence)
+            and 0.8 <= confidence <= 1.0
+        )
+        if not confidence_is_valid:
             gate_result = {
                 "allowed": False,
                 "suggested_decision": "manual_review_required",
-                "reasons": ["approval_confidence_below_threshold"],
+                "reasons": [
+                    "approval_confidence_below_threshold"
+                    if isinstance(confidence, (int, float))
+                    and not isinstance(confidence, bool)
+                    and math.isfinite(confidence)
+                    else "approval_confidence_missing_or_invalid"
+                ],
                 "recoverable_fields": [],
                 "review_blockers": [],
             }
             decision_reasoning = (
                 decision_reasoning
                 + " | Safety gate blocked automatic approval: "
-                + "approval_confidence_below_threshold"
+                + gate_result["reasons"][0]
             ).strip(" |")
             return (
                 "manual_review_required",
