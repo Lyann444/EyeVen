@@ -100,6 +100,10 @@ class CaseService:
     def get_form_alignment(case_id):
         case = VendorCase.query.get_or_404(case_id)
         fields = EyeVenFormFieldValue.query.filter_by(vendor_case_id=case_id).all()
+        if not fields:
+            CaseService._seed_form_fields(case_id)
+            db.session.commit()
+            fields = EyeVenFormFieldValue.query.filter_by(vendor_case_id=case_id).all()
         return {
             "case_id": case_id,
             "intake_type": case.intake_type,
