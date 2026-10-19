@@ -99,12 +99,29 @@ export interface PolicyEvaluationRun {
   created_at: string;
 }
 
+export interface SafetyGateResult {
+  allowed: boolean;
+  suggested_decision?: RoutingDecisionCode;
+  reasons: string[];
+  recoverable_fields?: string[];
+  review_blockers?: string[];
+}
+
+export interface WorkflowTraceStage {
+  stage: string;
+  state_before: string;
+  state_after: string;
+  status: string;
+}
+
 export interface RoutingDecision {
   id: number;
   vendor_case_id: number;
   decision_code: RoutingDecisionCode;
   recommended_procurement_action: string | null;
   decision_reasoning_summary: string;
+  decision_reason_codes?: string[];
+  safety_gate_result?: SafetyGateResult | null;
   confidence_score: number | null;
   created_at: string;
 }
