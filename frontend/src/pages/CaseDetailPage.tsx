@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Card, CardContent, Grid, Chip, Table, TableBody,
   TableCell, TableContainer, TableHead, TableRow, Paper, Button,
-  Divider, CircularProgress, Accordion, AccordionSummary, AccordionDetails,
+  Divider, CircularProgress, Accordion, AccordionSummary, AccordionDetails, Alert, Stack,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -47,6 +47,8 @@ const CaseDetailPage: React.FC = () => {
   const [audit, setAudit] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [workflowTrace, setWorkflowTrace] = useState<any[]>([]);
+  const [workflowMessage, setWorkflowMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -79,11 +81,36 @@ const CaseDetailPage: React.FC = () => {
   const runWorkflow = async () => {
     if (!caseId) return;
     setRunning(true);
+    setWorkflowMessage(null);
     try {
-      await caseService.runWorkflow(parseInt(caseId));
-      window.location.reload();
+      const workflowResponse = await caseService.runWorkflow(parseInt(caseId));
+      const trace = workflowResponse.data?.trace;
+      setWorkflowTrace(Array.isArray(trace) ? trace : []);
+      setWorkflowMessage(
+        Array.isArray(trace) && trace.length > 0
+          ? 'Workflow finished. The trace below shows the stages executed in this run.'
+          : 'The workflow returned no stage trace. The case may already be in a terminal state.'
+      );
+
+      // Refresh the case panels without a full page reload so the execution trace remains visible.
+      const id = parseInt(caseId);
+      const [c, fa, v, p, r, a] = await Promise.all([
+        caseService.getCaseDetail(id),
+        apiClient.get(`/workflow/${id}/form-alignment`),
+        caseService.getVerification(id),
+        caseService.getPolicy(id),
+        caseService.getRouting(id),
+        auditService.getAuditTrail(id),
+      ]);
+      setCaseData(c.data);
+      setFormFields(fa.data?.fields || []);
+      setVerification(v.data);
+      setPolicy(p.data);
+      setRouting(r.data);
+      setAudit(a.data);
     } catch (e) {
       console.error('Workflow run failed', e);
+      setWorkflowMessage('Workflow execution failed. Check the backend logs for details.');
     } finally {
       setRunning(false);
     }
@@ -119,6 +146,50 @@ const CaseDetailPage: React.FC = () => {
           </Button>
         </Box>
       </Box>
+
+      {workflowMessage && (
+        <Alert severity={workflowTrace.length > 0 ? 'success' : 'info'} sx={{ mb: 2 }}>
+          {workflowMessage}
+        </Alert>
+      )}
+
+      {/* Execution trace from the latest workflow run in this page session */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>Workflow Execution Trace</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Shows the state transitions returned by the orchestrator for the latest run. This trace is not a historical log; saved verification, policy, and routing runs appear in the audit trail below.
+          </Typography>
+          {workflowTrace.length === 0 ? (
+            <Alert severity="info">
+              Run the workflow to display its execution trace here.
+            </Alert>
+          ) : (
+            <Stack spacing={1.5}>
+              {workflowTrace.map((item: any, index: number) => (
+                <Box key={`${item.stage || 'stage'}-${index}`} sx={{
+                  display: 'flex', gap: 2, alignItems: 'flex-start', p: 1.5,
+                  border: '1px solid', borderColor: 'divider', borderRadius: 2,
+                }}>
+                  <Chip label={index + 1} size="small" color="primary" />
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography sx={{ fontWeight: 600 }}>{fmtStatus(item.stage || 'unknown stage')}</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {fmtStatus(item.state_before || 'unknown')} → {fmtStatus(item.state_after || 'unknown')}
+                    </Typography>
+                  </Box>
+                  <Chip
+                    size="small"
+                    label={fmtStatus(item.status || 'completed')}
+                    color={['completed', 'success'].includes(item.status) ? 'success' : item.status === 'glm_failed' ? 'error' : 'default'}
+                    variant="outlined"
+                  />
+                </Box>
+              ))}
+            </Stack>
+          )}
+        </CardContent>
+      </Card>
 
       <Grid container spacing={3}>
         {/* Form Alignment Panel */}
@@ -268,6 +339,79 @@ const CaseDetailPage: React.FC = () => {
                     {routing?.decision_reasoning_summary || 'No reasoning provided'}
                   </Typography>
                 </>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Deterministic safety gate and structured audit details */}
+        <Grid size={12}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>Safety Gate & Decision Reasons</Typography>
+              {audit?.routing_decisions?.length > 0 ? (() => {
+                const latestDecision = audit.routing_decisions[audit.routing_decisions.length - 1];
+                const gate = latestDecision.safety_gate_result;
+                const reasonCodes = Array.isArray(latestDecision.decision_reason_codes)
+                  ? latestDecision.decision_reason_codes
+                  : [];
+                return (
+                  <Box>
+                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mb: 2 }}>
+                      <Chip
+                        label={gate ? (gate.allowed ? 'Safety Gate Passed' : 'Safety Gate Blocked Approval') : 'Safety Gate Not Invoked'}
+                        color={gate ? (gate.allowed ? 'success' : 'error') : 'default'}
+                      />
+                      <Chip label={`Decision: ${fmtStatus(latestDecision.decision_code || 'unknown')}`} variant="outlined" />
+                    </Box>
+                    {gate ? (
+                      <>
+                        <Typography variant="body2" sx={{ mb: 1 }}>
+                          {gate.allowed
+                            ? 'The deterministic checks allowed the automatic approval recommendation.'
+                            : 'The deterministic checks vetoed automatic approval. The persisted routing decision reflects the safer outcome.'}
+                        </Typography>
+                        {reasonCodes.length > 0 && (
+                          <>
+                            <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>Reason Codes</Typography>
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                              {reasonCodes.map((code: string, index: number) => (
+                                <Chip key={`${code}-${index}`} label={code} size="small" color={gate.allowed ? 'success' : 'error'} variant="outlined" />
+                              ))}
+                            </Box>
+                          </>
+                        )}
+                        {Array.isArray(gate.recoverable_fields) && gate.recoverable_fields.length > 0 && (
+                          <Box sx={{ mt: 2 }}>
+                            <Typography variant="subtitle2">Recoverable Fields</Typography>
+                            <Typography variant="body2">{gate.recoverable_fields.join(', ')}</Typography>
+                          </Box>
+                        )}
+                        {Array.isArray(gate.review_blockers) && gate.review_blockers.length > 0 && (
+                          <Box sx={{ mt: 2 }}>
+                            <Typography variant="subtitle2">Review Blockers</Typography>
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
+                              {gate.review_blockers.map((blocker: string, index: number) => (
+                                <Chip key={`${blocker}-${index}`} label={blocker} size="small" color="error" variant="outlined" />
+                              ))}
+                            </Box>
+                          </Box>
+                        )}
+                      </>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">
+                        This decision did not invoke the approval safety gate. Its reason code is still recorded for auditability.
+                      </Typography>
+                    )}
+                    {reasonCodes.length === 0 && (
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                        No structured reason codes were returned for this saved decision.
+                      </Typography>
+                    )}
+                  </Box>
+                );
+              })() : (
+                <Typography color="text.secondary">No saved routing decision is available yet. Run the workflow first.</Typography>
               )}
             </CardContent>
           </Card>
