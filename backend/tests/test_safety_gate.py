@@ -141,6 +141,38 @@ class SafetyGateTests(unittest.TestCase):
         self.assertFalse(result["allowed"])
         self.assertIn("policy_risk_flags_malformed", result["reasons"])
 
+
+    def test_critical_identity_field_requires_corroborating_evidence(self):
+        fields = complete_fields()
+        company_number = next(
+            item for item in fields
+            if item.field_name == "company_registered_number"
+        )
+        company_number.status = "provided_in_form"
+
+        result = SafetyGate.evaluate_results(verification(), policy(), fields)
+
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["suggested_decision"], "manual_review_required")
+        self.assertTrue(
+            any(
+                item.startswith("company_registered_number:evidence_not_corroborated")
+                for item in result["review_blockers"]
+            )
+        )
+
+    def test_supporting_document_status_satisfies_evidence_requirement(self):
+        fields = complete_fields()
+        bank_account = next(
+            item for item in fields if item.field_name == "bank_account_number"
+        )
+        bank_account.status = "filled_from_supporting_docs"
+
+        result = SafetyGate.evaluate_results(verification(), policy(), fields)
+
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["suggested_decision"], "complete_verified")
+
     def test_missing_optional_field_does_not_block_approval(self):
         fields = complete_fields()
         fields.append(make_field("company_website", status="missing", value=""))
