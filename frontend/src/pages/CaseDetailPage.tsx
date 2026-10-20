@@ -364,6 +364,22 @@ const CaseDetailPage: React.FC = () => {
                   <Typography variant="body2" color="text.secondary">
                     {routing?.decision_reasoning_summary || 'No reasoning provided'}
                   </Typography>
+                  <Divider sx={{ my: 2 }} />
+                  <Typography variant="subtitle2" gutterBottom>Supporting Decision Evidence</Typography>
+                  {Array.isArray(routing?.decision_evidence) && routing.decision_evidence.length > 0 ? (
+                    <Stack spacing={1}>
+                      {routing.decision_evidence.map((item: { source: string; finding: string }, index: number) => (
+                        <Box key={`evidence-${index}`} sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>{item.source}</Typography>
+                          <Typography variant="body2" color="text.secondary">{item.finding}</Typography>
+                        </Box>
+                      ))}
+                    </Stack>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">
+                      No structured decision evidence was returned for this routing decision.
+                    </Typography>
+                  )}
                 </>
               )}
             </CardContent>
