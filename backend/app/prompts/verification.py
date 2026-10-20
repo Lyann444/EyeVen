@@ -56,6 +56,12 @@ Return a JSON object:
   "critical_mismatches": [
     {{"field_name": "<string>", "description": "<string>"}}
   ],
+
+STRICT JSON SHAPE RULES FOR ALL MISMATCH ARRAYS:
+- Every item in minor_mismatches, moderate_mismatches, and critical_mismatches MUST be a JSON object with both field_name and description string properties.
+- NEVER return a bare string such as "company_registered_number" as an array item.
+- Put the field name in field_name and explain the observed mismatch in description.
+- If you cannot explain a mismatch from the supplied evidence, do not invent a description; report the uncertainty in description and recommend manual review.
   "internal_registry_match_status": "matched" | "mismatched" | "no_match" | null,
   "external_verification_status": "verified" | "partially_verified" | "unverifiable" | "failed" | null,
   "summary": "<string>",
