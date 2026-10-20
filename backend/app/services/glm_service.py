@@ -73,6 +73,7 @@ class GlmService:
         parsed = GlmService._parse_json_response(result)
 
         if response_schema:
+            parsed = GlmService._normalize_mismatch_arrays(parsed, response_schema)
             GlmService._validate_schema(parsed, response_schema)
 
         return parsed
@@ -153,6 +154,40 @@ class GlmService:
         except json.JSONDecodeError as e:
             raise GlmMalformedOutputError(f"Could not parse GLM output as JSON: {e}") from e
 
+    @staticmethod
+    def _normalize_mismatch_arrays(data: dict, schema: dict) -> dict:
+        """Safely structure bare field-name strings in verification mismatch arrays.
+
+        A missing explanation is explicitly marked rather than fabricated. Other
+        malformed shapes remain subject to normal schema validation.
+        """
+        mismatch_keys = {"minor_mismatches", "moderate_mismatches", "critical_mismatches"}
+        properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
+        if not isinstance(data, dict) or not any(key in properties for key in mismatch_keys):
+            return data
+
+        normalized = dict(data)
+        for key in mismatch_keys:
+            items = normalized.get(key)
+            if not isinstance(items, list):
+                continue
+            repaired = []
+            for item in items:
+                if isinstance(item, str) and item.strip():
+                    repaired.append({
+                        "field_name": item.strip(),
+                        "description": (
+                            "Model returned a field name without a mismatch description; "
+                            "the issue is not sufficiently documented and requires manual review."
+                        ),
+                    })
+                    logger.warning(
+                        "Normalized malformed verification mismatch item: array=%s", key
+                    )
+                else:
+                    repaired.append(item)
+            normalized[key] = repaired
+        return normalized
     @staticmethod
     def _validate_schema(data: dict, schema: dict) -> None:
         try:
