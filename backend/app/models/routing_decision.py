@@ -34,5 +34,7 @@ class RoutingDecision(db.Model):
     # JSON-encoded machine-readable safety-gate reason codes and result.
     decision_reason_codes = db.Column(db.Text, nullable=True)
     safety_gate_result = db.Column(db.Text, nullable=True)
+    # JSON-encoded source/finding pairs supporting the routing recommendation.
+    decision_evidence = db.Column(db.Text, nullable=True)
     confidence_score = db.Column(db.Numeric(5, 4), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
