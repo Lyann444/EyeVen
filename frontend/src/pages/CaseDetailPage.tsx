@@ -109,7 +109,9 @@ const CaseDetailPage: React.FC = () => {
 
       // Refresh the case panels without a full page reload so the execution trace remains visible.
       const id = parseInt(caseId);
-      const [c, fa, v, p, r, a] = await Promise.all([
+      // Refresh each panel independently. Promise.all would reject the entire refresh
+      // if any one endpoint failed, leaving every panel stale until the page was reopened.
+      const refreshResults = await Promise.allSettled([
         caseService.getCaseDetail(id),
         apiClient.get(`/workflow/${id}/form-alignment`),
         caseService.getVerification(id),
@@ -117,12 +119,19 @@ const CaseDetailPage: React.FC = () => {
         caseService.getRouting(id),
         auditService.getAuditTrail(id),
       ]);
-      setCaseData(c.data);
-      setFormFields(fa.data?.fields || []);
-      setVerification(v.data);
-      setPolicy(p.data);
-      setRouting(r.data);
-      setAudit(a.data);
+      const [c, fa, v, p, r, a] = refreshResults;
+      if (c.status === 'fulfilled') setCaseData(c.value.data);
+      else console.error('Failed to refresh case details', c.reason);
+      if (fa.status === 'fulfilled') setFormFields(fa.value.data?.fields || []);
+      else console.error('Failed to refresh form alignment', fa.reason);
+      if (v.status === 'fulfilled') setVerification(v.value.data);
+      else console.error('Failed to refresh verification', v.reason);
+      if (p.status === 'fulfilled') setPolicy(p.value.data);
+      else console.error('Failed to refresh policy', p.reason);
+      if (r.status === 'fulfilled') setRouting(r.value.data);
+      else console.error('Failed to refresh routing', r.reason);
+      if (a.status === 'fulfilled') setAudit(a.value.data);
+      else console.error('Failed to refresh audit trail', a.reason);
     } catch (e) {
       console.error('Workflow run failed', e);
       setWorkflowMessage('Workflow execution failed. Check the backend logs for details.');
