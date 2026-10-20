@@ -86,6 +86,9 @@ class AuditService:
                     "id": r.id,
                     "decision_code": r.decision_code,
                     "reasoning_summary": r.decision_reasoning_summary,
+                    "decision_evidence": AuditService._parse_json_list(
+                        getattr(r, "decision_evidence", None)
+                    ),
                     "decision_reason_codes": AuditService._parse_json_list(
                         getattr(r, "decision_reason_codes", None)
                     ),
