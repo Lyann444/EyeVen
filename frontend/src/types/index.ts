@@ -117,12 +117,18 @@ export interface WorkflowTraceStage {
   duration_ms: number | null;
 }
 
+export interface DecisionEvidence {
+  source: string;
+  finding: string;
+}
+
 export interface RoutingDecision {
   id: number;
   vendor_case_id: number;
   decision_code: RoutingDecisionCode;
   recommended_procurement_action: string | null;
   decision_reasoning_summary: string;
+  decision_evidence?: DecisionEvidence[];
   decision_reason_codes?: string[];
   safety_gate_result?: SafetyGateResult | null;
   confidence_score: number | null;
