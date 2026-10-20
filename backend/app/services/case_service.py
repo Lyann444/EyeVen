@@ -180,6 +180,7 @@ class CaseService:
             "decision_code": latest.decision_code,
             "recommended_procurement_action": latest.recommended_procurement_action,
             "decision_reasoning_summary": latest.decision_reasoning_summary,
+            "decision_evidence": latest.decision_evidence,
             "confidence_score": float(latest.confidence_score) if latest.confidence_score else None,
             "created_at": latest.created_at.isoformat() if latest.created_at else None,
         }
