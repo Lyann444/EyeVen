@@ -178,10 +178,10 @@ class InternalRegistryService:
         normalized = (value or "").strip().lower()
         if field_name in {"ssm_roc_rob_number", "company_registered_number"}:
             # Malaysian registration documents may include a legacy number in parentheses.
-            match = re.search(r"\\b\\d{12}\\b", normalized)
+            match = re.search(r"\b\d{12}\b", normalized)
             if match:
                 return match.group(0)
-        return re.sub(r"\\s+", " ", normalized)
+        return re.sub(r"\s+", " ", normalized)
 
     @staticmethod
     def _fuzzy_match(a, b):
