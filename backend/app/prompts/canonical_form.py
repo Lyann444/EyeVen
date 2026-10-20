@@ -84,7 +84,19 @@ FORBIDDEN BEHAVIOR:
 - Never mark a field as matched_with_evidence without actual evidence
 - Never silently fill a field with guessed information
 - Unresolved fields MUST remain explicitly missing, conflicting, unverifiable, or low_confidence
+EVIDENCE REFERENCE RULES:
 
+evidence_reference.source_type MUST always be a non-empty string. Never return null for this field.
+
+Use "unknown" when the source type cannot be determined.
+
+For values extracted directly from the procurement form, use "procurement_form".
+
+For values extracted from supporting documents, use "supporting_document".
+
+When no evidence supports a field, set source_document_id and source_excerpt to null, and set source_type to "unknown".
+
+Never invent a source document ID or evidence excerpt.
 FALLBACK BEHAVIOR:
 - If document text is unreadable or empty, mark affected fields as "unverifiable"
 - If evidence is ambiguous, mark as "low_confidence" rather than guessing

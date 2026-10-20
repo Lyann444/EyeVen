@@ -2,6 +2,7 @@ import logging
 from datetime import datetime
 
 from app.extensions import db
+from app.orchestrators.workflow_lock import prevent_concurrent_case_runs
 from app.models import (
     VendorCase,
     UploadedFile,
@@ -19,7 +20,15 @@ logger = logging.getLogger(__name__)
 
 
 class ReprocessingOrchestrator:
+    SUPPORTED_STAGES = {
+        "extraction",
+        "form_structuring",
+        "verification",
+        "policy_evaluation",
+    }
+
     @staticmethod
+    @prevent_concurrent_case_runs
     def run(case_id, trigger_type="corrected_upload"):
         case = VendorCase.query.get_or_404(case_id)
         previous_state = case.current_state
@@ -73,6 +82,91 @@ class ReprocessingOrchestrator:
                 "previous_state": previous_state,
                 "status": "failed",
                 "error": str(e),
+            }
+
+    @staticmethod
+    @prevent_concurrent_case_runs
+    def run_stage(case_id, target_stage):
+        if target_stage not in ReprocessingOrchestrator.SUPPORTED_STAGES:
+            raise ValueError(f"Unsupported reprocessing stage: {target_stage!r}")
+
+        case = VendorCase.query.get_or_404(case_id)
+        previous_state = case.current_state
+        reprocessing_run = ReprocessingRun(
+            vendor_case_id=case_id,
+            trigger_type="manual_rerun",
+            reason_summary=f"Agentic stage reprocessing: {target_stage}",
+            previous_case_state=previous_state,
+            run_status="started",
+        )
+        db.session.add(reprocessing_run)
+        case.current_state = "reprocessing"
+        db.session.commit()
+
+        try:
+            from app.services.form_service import FormService
+
+            if target_stage == "extraction":
+                stage_result = WorkflowOrchestrator._summarize_extraction_result(
+                    ExtractionOrchestrator.run(case_id)
+                )
+            elif target_stage == "form_structuring":
+                stage_result = FormService.structure_form(case_id)
+            elif target_stage == "verification":
+                stage_result = WorkflowOrchestrator._run_verification(case_id)
+            else:
+                stage_result = WorkflowOrchestrator._run_policy_evaluation(case_id)
+
+            if stage_result.get("status") in {"failed", "glm_failed"}:
+                case = VendorCase.query.get(case_id)
+                case.current_state = "manual_review_required"
+                reprocessing_run.run_status = "failed"
+                reprocessing_run.new_case_state = case.current_state
+                reprocessing_run.completed_at = datetime.utcnow()
+                db.session.commit()
+                return {
+                    "case_id": case_id,
+                    "reprocessing_run_id": reprocessing_run.id,
+                    "status": "failed",
+                    "stage": target_stage,
+                    "new_state": case.current_state,
+                }
+
+            workflow_result = WorkflowOrchestrator.run(
+                case_id, include_agentic=False
+            )
+            case = VendorCase.query.get(case_id)
+            reprocessing_run.new_case_state = case.current_state
+            reprocessing_run.run_status = "completed"
+            reprocessing_run.completed_at = datetime.utcnow()
+            db.session.commit()
+            return {
+                "case_id": case_id,
+                "reprocessing_run_id": reprocessing_run.id,
+                "status": "completed",
+                "stage": target_stage,
+                "new_state": case.current_state,
+                "downstream_stages": workflow_result.get("stages_run", []),
+            }
+        except Exception as error:
+            logger.exception(
+                "Stage reprocessing failed for case %d at %s",
+                case_id,
+                target_stage,
+            )
+            case = VendorCase.query.get(case_id)
+            case.current_state = "manual_review_required"
+            reprocessing_run.run_status = "failed"
+            reprocessing_run.new_case_state = case.current_state
+            reprocessing_run.completed_at = datetime.utcnow()
+            db.session.commit()
+            return {
+                "case_id": case_id,
+                "reprocessing_run_id": reprocessing_run.id,
+                "status": "failed",
+                "stage": target_stage,
+                "new_state": case.current_state,
+                "error": str(error),
             }
 
     @staticmethod

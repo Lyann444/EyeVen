@@ -42,7 +42,7 @@ Return a JSON object:
       "flag_type": "<string>",
       "description": "<string>",
       "field_name": "<string or null>",
-      "severity": "informational" | "warning" | "blocking"
+      "severity": "informational" | "warning" | "recoverable" | "blocking"
     }}
   ],
   "blocking_issues": ["<string>", ...],

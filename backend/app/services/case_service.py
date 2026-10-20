@@ -6,7 +6,6 @@ from app.models import (
     VendorCase, EyeVenFormFieldValue, UploadedFile,
     VerificationRun, PolicyEvaluationRun, RoutingDecision, EmailDraft,
 )
-from app.orchestrators.extraction_orchestrator import ExtractionOrchestrator
 from app.orchestrators.workflow_orchestrator import WorkflowOrchestrator
 from app.orchestrators.reprocessing_orchestrator import ReprocessingOrchestrator
 
@@ -83,14 +82,7 @@ class CaseService:
 
     @staticmethod
     def run_workflow(case_id):
-        case = VendorCase.query.get_or_404(case_id)
-
-        if case.current_state in ("uploaded", "intake_received"):
-            ExtractionOrchestrator.run(case_id)
-            case = VendorCase.query.get(case_id)
-
-        workflow_result = WorkflowOrchestrator.run(case_id)
-        return workflow_result
+        return WorkflowOrchestrator.run(case_id)
 
     @staticmethod
     def rerun_affected_stages(case_id):

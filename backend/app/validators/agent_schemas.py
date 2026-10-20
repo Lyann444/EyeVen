@@ -282,7 +282,10 @@ POLICY_EVALUATION_SCHEMA = {
                     "flag_type": {"type": "string"},
                     "description": {"type": "string"},
                     "field_name": {"type": ["string", "null"]},
-                    "severity": {"type": "string", "enum": ["informational", "warning", "blocking"]},
+                    "severity": {
+                        "type": "string",
+                        "enum": ["informational", "warning", "recoverable", "blocking"],
+                    },
                 },
                 "required": ["flag_type", "description", "severity"],
             },
@@ -418,6 +421,85 @@ FOLLOW_UP_SCHEMA = {
 }
 
 # ---------------------------------------------------------------------------
+# Agent 5: Next-action planning
+# ---------------------------------------------------------------------------
+
+CANONICAL_FIELD_NAMES = [
+    "registration_type",
+    "current_vendor_number",
+    "company_registered_name",
+    "company_registered_number",
+    "company_registered_address",
+    "company_website",
+    "company_email",
+    "main_office_phone_number",
+    "year_of_establishment",
+    "business_type",
+    "business_type_other",
+    "contact_person_name",
+    "designation",
+    "contact_email",
+    "contact_mobile_number",
+    "bank_name",
+    "bank_account_name",
+    "bank_account_number",
+    "latest_annual_revenue_range",
+    "ssm_roc_rob_number",
+    "tax_sst_gst_number",
+    "iso_certification_available",
+    "iso_certification_number",
+    "iso_certification_expiry_date",
+    "main_business_activities",
+    "top_3_major_clients",
+    "legal_disputes_past_5_years",
+    "legal_disputes_details",
+    "outsource_any_part_of_services",
+    "outsourcing_details",
+    "number_of_employees",
+    "authorized_signature_present",
+    "signatory_name",
+    "signatory_designation",
+    "signatory_ic_or_passport_number",
+    "declaration_date",
+    "company_chop_present",
+]
+
+NEXT_ACTION_SCHEMA = {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+        "action": {
+            "type": "string",
+            "enum": [
+                "targeted_verification",
+                "reprocess_stage",
+                "request_information",
+                "manual_review",
+                "finish",
+            ],
+        },
+        "reason": {"type": "string", "minLength": 1},
+        "target_fields": {
+            "type": "array",
+            "uniqueItems": True,
+            "items": {"type": "string", "enum": CANONICAL_FIELD_NAMES},
+        },
+        "target_stage": {
+            "type": ["string", "null"],
+            "enum": [
+                "extraction",
+                "form_structuring",
+                "verification",
+                "policy_evaluation",
+                None,
+            ],
+        },
+    },
+    "required": ["action", "reason", "target_fields", "target_stage"],
+    "additionalProperties": False,
+}
+
+# ---------------------------------------------------------------------------
 # Lookup: map stage name to schema
 # ---------------------------------------------------------------------------
 
@@ -428,4 +510,5 @@ AGENT_OUTPUT_SCHEMAS = {
     "policy_evaluation": POLICY_EVALUATION_SCHEMA,
     "routing": ROUTING_SCHEMA,
     "follow_up": FOLLOW_UP_SCHEMA,
+    "next_action": NEXT_ACTION_SCHEMA,
 }

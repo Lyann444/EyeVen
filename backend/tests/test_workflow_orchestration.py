@@ -23,6 +23,19 @@ class WorkflowOrchestrationTests(unittest.TestCase):
         )
         self.query_patch.start()
         self.addCleanup(self.query_patch.stop)
+        self.db_patch = patch(
+            "app.orchestrators.workflow_orchestrator.db",
+            new=SimpleNamespace(session=SimpleNamespace(commit=Mock())),
+        )
+        self.db_patch.start()
+        self.addCleanup(self.db_patch.stop)
+        self.agentic_patch = patch.object(
+            WorkflowOrchestrator,
+            "_run_agentic_loop",
+            return_value=([], "manual_review_required"),
+        )
+        self.agentic_patch.start()
+        self.addCleanup(self.agentic_patch.stop)
 
     def test_policy_success_then_routing_runs_in_order(self):
         calls = []
@@ -103,7 +116,7 @@ class WorkflowOrchestrationTests(unittest.TestCase):
 
         routing.assert_not_called()
         self.assertEqual(result["stages_run"], ["policy_evaluation"])
-        self.assertEqual(result["current_state"], "manual_review_required")
+        self.assertEqual(result["current_state"], "processing_failed")
         self.assertEqual(result["trace"][0]["status"], "glm_failed")
         self.assertEqual(
             result["trace"][0]["state_after"], "manual_review_required"
@@ -203,6 +216,23 @@ class WorkflowOrchestrationTests(unittest.TestCase):
     def test_normalize_decision_evidence_handles_non_list_output(self):
         self.assertEqual(WorkflowOrchestrator._normalize_decision_evidence(None), [])
         self.assertEqual(WorkflowOrchestrator._normalize_decision_evidence({"source": "x"}), [])
+
+    def test_extraction_trace_summary_omits_extracted_content(self):
+        result = WorkflowOrchestrator._summarize_extraction_result({
+            "current_state": "intake_classified",
+            "files_processed": 1,
+            "zip_files_extracted": 0,
+            "extraction_results": [{
+                "file_id": 7,
+                "filename": "private.pdf",
+                "status": "completed",
+                "full_text": "private document contents",
+            }],
+        })
+
+        self.assertEqual(result["status"], "completed")
+        self.assertNotIn("private.pdf", str(result))
+        self.assertNotIn("private document contents", str(result))
 
 
 if __name__ == "__main__":

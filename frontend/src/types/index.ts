@@ -117,6 +117,23 @@ export interface WorkflowTraceStage {
   duration_ms: number | null;
 }
 
+export interface WorkflowAgenticAction {
+  sequence: number;
+  action: string | null;
+  reason: string;
+  target_fields: string[];
+  target_stage: string | null;
+  status: string;
+  state_before: string;
+  state_after: string;
+  started_at: string;
+  completed_at: string;
+  duration_ms: number;
+  progress: boolean;
+  result?: Record<string, unknown> | null;
+  failure_reason?: string | null;
+}
+
 export interface DecisionEvidence {
   source: string;
   finding: string;

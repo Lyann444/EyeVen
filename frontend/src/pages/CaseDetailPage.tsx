@@ -10,7 +10,12 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import apiClient from '../services/apiClient';
 import { caseService } from '../services/caseService';
 import { auditService } from '../services/auditService';
-import { VendorCase, FormFieldValue, WorkflowTraceStage } from '../types';
+import {
+  VendorCase,
+  FormFieldValue,
+  WorkflowTraceStage,
+  WorkflowAgenticAction,
+} from '../types';
 
 const statusColor = (s: string) => {
   switch (s) {
@@ -48,6 +53,8 @@ const CaseDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [workflowTrace, setWorkflowTrace] = useState<WorkflowTraceStage[]>([]);
+  const [agenticTrace, setAgenticTrace] = useState<WorkflowAgenticAction[]>([]);
+  const [stoppingReason, setStoppingReason] = useState<string | null>(null);
   const [workflowMessage, setWorkflowMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -100,16 +107,31 @@ const CaseDetailPage: React.FC = () => {
     try {
       const workflowResponse = await caseService.runWorkflow(parseInt(caseId));
       const trace = workflowResponse.data?.trace;
+      const agentTrace = workflowResponse.data?.agentic_trace;
+      const routingResult = workflowResponse.data?.results?.routing;
       setWorkflowTrace(Array.isArray(trace) ? trace : []);
+      setAgenticTrace(Array.isArray(agentTrace) ? agentTrace : []);
+      setStoppingReason(workflowResponse.data?.stopping_reason || null);
       setWorkflowMessage(
-        Array.isArray(trace) && trace.length > 0
-          ? 'Workflow finished. The trace below shows the stages executed in this run.'
-          : 'The workflow returned no stage trace. The case may already be in a terminal state.'
+        workflowResponse.data?.stopping_reason
+          ? `Workflow stopped: ${fmtStatus(workflowResponse.data.stopping_reason)}.`
+          : Array.isArray(trace) && trace.length > 0
+            ? 'Workflow finished. The trace below shows the stages executed in this run.'
+            : 'The workflow returned no stage trace. The case may already be in a terminal state.'
       );
+      if (routingResult?.decision_code) {
+        setRouting({
+          decision_code: routingResult.decision_code,
+          recommended_procurement_action: routingResult.recommended_procurement_action,
+          decision_reasoning_summary: routingResult.reasoning,
+          decision_evidence: routingResult.decision_evidence || [],
+          confidence_score: routingResult.confidence,
+        });
+      }
 
       // Refresh the case panels without a full page reload so the execution trace remains visible.
       const id = parseInt(caseId);
-      const [c, fa, v, p, r, a] = await Promise.all([
+      const refreshResults = await Promise.allSettled([
         caseService.getCaseDetail(id),
         apiClient.get(`/workflow/${id}/form-alignment`),
         caseService.getVerification(id),
@@ -117,14 +139,22 @@ const CaseDetailPage: React.FC = () => {
         caseService.getRouting(id),
         auditService.getAuditTrail(id),
       ]);
-      setCaseData(c.data);
-      setFormFields(fa.data?.fields || []);
-      setVerification(v.data);
-      setPolicy(p.data);
-      setRouting(r.data);
-      setAudit(a.data);
+      const [c, fa, v, p, r, a] = refreshResults;
+      if (c.status === 'fulfilled') setCaseData(c.value.data);
+      else console.error('Failed to refresh case details', c.reason);
+      if (fa.status === 'fulfilled') setFormFields(fa.value.data?.fields || []);
+      else console.error('Failed to refresh form alignment', fa.reason);
+      if (v.status === 'fulfilled') setVerification(v.value.data);
+      else console.error('Failed to refresh verification', v.reason);
+      if (p.status === 'fulfilled') setPolicy(p.value.data);
+      else console.error('Failed to refresh policy', p.reason);
+      if (r.status === 'fulfilled') setRouting(r.value.data);
+      else console.error('Failed to refresh routing', r.reason);
+      if (a.status === 'fulfilled') setAudit(a.value.data);
+      else console.error('Failed to refresh audit trail', a.reason);
     } catch (e) {
       console.error('Workflow run failed', e);
+      setStoppingReason('workflow_request_failed');
       setWorkflowMessage('Workflow execution failed. Check the backend logs for details.');
     } finally {
       setRunning(false);
@@ -163,7 +193,20 @@ const CaseDetailPage: React.FC = () => {
       </Box>
 
       {workflowMessage && (
-        <Alert severity={workflowTrace.length > 0 ? 'success' : 'info'} sx={{ mb: 2 }}>
+        <Alert
+          severity={
+            stoppingReason?.includes('failure')
+              ? 'error'
+              : stoppingReason === 'terminal_case'
+                ? 'success'
+                : stoppingReason === 'planner_finish'
+                  ? 'info'
+                  : stoppingReason
+                    ? 'warning'
+                    : workflowTrace.length > 0 ? 'success' : 'info'
+          }
+          sx={{ mb: 2 }}
+        >
           {workflowMessage}
         </Alert>
       )}
@@ -216,6 +259,66 @@ const CaseDetailPage: React.FC = () => {
           )}
         </CardContent>
       </Card>
+
+      {agenticTrace.length > 0 && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>Agentic Actions</Typography>
+            <Stack spacing={1.5}>
+              {agenticTrace.map(action => (
+                <Box key={action.sequence} sx={{
+                  p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 2,
+                }}>
+                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 1 }}>
+                    <Chip label={`Action ${action.sequence}`} size="small" color="primary" />
+                    <Typography sx={{ fontWeight: 600 }}>
+                      {fmtStatus(action.action || 'planner failure')}
+                    </Typography>
+                    <Chip
+                      label={fmtStatus(action.status)}
+                      size="small"
+                      color={action.status.includes('failed') ? 'error' : 'default'}
+                      variant="outlined"
+                    />
+                    <Chip
+                      label={action.progress ? 'Progress made' : 'No progress'}
+                      size="small"
+                      color={action.progress ? 'success' : 'warning'}
+                      variant="outlined"
+                    />
+                  </Box>
+                  <Typography variant="body2">{action.reason}</Typography>
+                  {(action.target_fields.length > 0 || action.target_stage) && (
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      Target: {action.target_stage || action.target_fields.join(', ')}
+                    </Typography>
+                  )}
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                    {fmtStatus(action.state_before)} → {fmtStatus(action.state_after)}
+                    {' · '}{action.duration_ms.toFixed(2)} ms
+                  </Typography>
+                  {action.failure_reason && (
+                    <Typography variant="body2" color="error" sx={{ mt: 0.5 }}>
+                      {action.failure_reason}
+                    </Typography>
+                  )}
+                  {action.result?.source === 'internal_demo_registry' && (
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      Internal demo registry result: {String(action.result.match_status || 'unknown')}
+                      {' · External verification was not performed'}
+                    </Typography>
+                  )}
+                </Box>
+              ))}
+            </Stack>
+            {stoppingReason && (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+                Stopping reason: {fmtStatus(stoppingReason)}
+              </Typography>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Grid container spacing={3}>
         {/* Form Alignment Panel */}

@@ -73,6 +73,12 @@ class GlmService:
         parsed = GlmService._parse_json_response(result)
 
         if response_schema:
+            # Normalize canonical form output before schema validation.
+            if response_schema.get("properties", {}).get("fields"):
+                parsed = GlmService._normalize_canonical_form(parsed)
+            if response_schema.get("properties", {}).get("critical_mismatches"):
+                parsed = GlmService._normalize_verification_mismatches(parsed)
+
             GlmService._validate_schema(parsed, response_schema)
 
         return parsed
@@ -100,6 +106,11 @@ class GlmService:
                 logger.info("Raw GLM response: %s", json.dumps(data)[:1000])
 
                 choice = data.get("choices", [{}])[0]
+                logger.info(
+    "LLM finish_reason=%s, usage=%s",
+    choice.get("finish_reason"),
+    data.get("usage"),
+)
                 message = choice.get("message", {})
                 content = message.get("content")
 
@@ -152,12 +163,48 @@ class GlmService:
             return json.loads(text)
         except json.JSONDecodeError as e:
             raise GlmMalformedOutputError(f"Could not parse GLM output as JSON: {e}") from e
+    @staticmethod
+    def _normalize_canonical_form(data: dict) -> dict:
+        for field in data.get("fields", []):
+            evidence = field.get("evidence_reference")
+            if isinstance(evidence, dict):
+                source_type = evidence.get("source_type")
+                if not isinstance(source_type, str) or not source_type.strip():
+                    evidence["source_type"] = "unknown"
+
+        return data
+
+    @staticmethod
+    def _normalize_verification_mismatches(data: dict) -> dict:
+        for key in ("minor_mismatches", "moderate_mismatches", "critical_mismatches"):
+            mismatches = data.get(key)
+            if not isinstance(mismatches, list):
+                continue
+
+            data[key] = [
+                {
+                    "field_name": item,
+                    "description": "Mismatch reported without additional details.",
+                }
+                if isinstance(item, str)
+                else item
+                for item in mismatches
+            ]
+
+        return data
 
     @staticmethod
     def _validate_schema(data: dict, schema: dict) -> None:
         try:
             jsonschema_validate(instance=data, schema=schema)
         except ValidationError as e:
+            field_path = ".".join(str(part) for part in e.absolute_path)
+            logger.error(
+                "LLM schema validation failed at '%s': %s",
+                field_path or "<root>",
+                e.message,
+            )
             raise GlmSchemaValidationError(
-                f"GLM output failed schema validation: {e.message}"
+                f"GLM output failed schema validation at "
+                f"'{field_path or '<root>'}': {e.message}"
             ) from e

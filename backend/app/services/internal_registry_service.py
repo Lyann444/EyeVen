@@ -42,9 +42,23 @@ MOCK_REGISTRY = [
 
 class InternalRegistryService:
     @staticmethod
-    def match_vendor(case_id):
+    def match_vendor(case_id, target_fields=None):
         fields = EyeVenFormFieldValue.query.filter_by(vendor_case_id=case_id).all()
         field_map = {f.field_name: (f.value_text or "").strip().lower() for f in fields}
+
+        checks = [
+            ("ssm_roc_rob_number", "ssm_roc_rob_number"),
+            ("company_registered_name", "company_registered_name"),
+            ("company_registered_number", "company_registered_number"),
+        ]
+        if target_fields is not None:
+            supported_fields = {
+                "company_registered_number",
+                "ssm_roc_rob_number",
+            }
+            if not target_fields or not set(target_fields).issubset(supported_fields):
+                raise ValueError("Unsupported internal registry target fields")
+            checks = [item for item in checks if item[0] in target_fields]
 
         submitted_ssm = field_map.get("ssm_roc_rob_number", "")
         submitted_name = field_map.get("company_registered_name", "")
@@ -61,19 +75,15 @@ class InternalRegistryService:
         best_match = None
         best_score = 0
         comparisons = []
+        match_threshold = min(2, len(checks))
 
         for record in MOCK_REGISTRY:
             score = 0
             max_score = 0
             field_results = []
 
-            checks = [
-                ("ssm_roc_rob_number", record["ssm_roc_rob_number"]),
-                ("company_registered_name", record["company_registered_name"]),
-                ("company_registered_number", record["company_registered_number"]),
-            ]
-
-            for field_name, registry_value in checks:
+            for field_name, registry_key in checks:
+                registry_value = record[registry_key]
                 submitted = field_map.get(field_name, "")
                 max_score += 1
 
@@ -120,9 +130,12 @@ class InternalRegistryService:
                 best_score = score
                 best_match = record
 
-        if best_score >= 2:
+        if best_score >= match_threshold:
             match_status = "matched"
-        elif best_score >= 1:
+        elif best_score >= 1 or (
+            target_fields is not None
+            and any(field_map.get(field_name) for field_name in target_fields)
+        ):
             match_status = "mismatched"
         else:
             match_status = "no_match"

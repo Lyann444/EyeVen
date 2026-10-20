@@ -28,6 +28,7 @@ class Config:
 
     MAX_UPLOAD_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50"))
     MAX_ZIP_FILES = int(os.getenv("MAX_ZIP_FILES", "20"))
+    MAX_AGENTIC_ACTIONS = int(os.getenv("MAX_AGENTIC_ACTIONS", "3"))
     UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")
 
     PADDLEOCR_LANG = os.getenv("PADDLEOCR_LANG", "en")
