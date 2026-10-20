@@ -175,6 +175,35 @@ class WorkflowOrchestrationTests(unittest.TestCase):
         self.assertEqual(result["current_state"], "completed")
         self.assertNotIn("trace", result)
 
+    def test_normalize_decision_evidence_keeps_valid_pairs(self):
+        result = WorkflowOrchestrator._normalize_decision_evidence([
+            {"source": "  company_registry  ", "finding": "  Registration number matched  "},
+            {"source": "policy_evaluation", "finding": "Risk band is low"},
+        ])
+
+        self.assertEqual(
+            result,
+            [
+                {"source": "company_registry", "finding": "Registration number matched"},
+                {"source": "policy_evaluation", "finding": "Risk band is low"},
+            ],
+        )
+
+    def test_normalize_decision_evidence_discards_malformed_items(self):
+        result = WorkflowOrchestrator._normalize_decision_evidence([
+            {"source": "registry", "finding": "matched"},
+            {"source": "", "finding": "empty source"},
+            {"source": "registry", "finding": "  "},
+            {"source": None, "finding": "missing source"},
+            "not an evidence object",
+        ])
+
+        self.assertEqual(result, [{"source": "registry", "finding": "matched"}])
+
+    def test_normalize_decision_evidence_handles_non_list_output(self):
+        self.assertEqual(WorkflowOrchestrator._normalize_decision_evidence(None), [])
+        self.assertEqual(WorkflowOrchestrator._normalize_decision_evidence({"source": "x"}), [])
+
 
 if __name__ == "__main__":
     unittest.main()
