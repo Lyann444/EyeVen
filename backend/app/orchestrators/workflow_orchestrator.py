@@ -311,6 +311,25 @@ class WorkflowOrchestrator:
         return decision_code, decision_reasoning, recommended_action, gate_result
 
     @staticmethod
+    def _normalize_decision_evidence(value):
+        """Keep only well-formed source/finding pairs from routing model output."""
+        if not isinstance(value, list):
+            return []
+
+        evidence = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            source = item.get("source")
+            finding = item.get("finding")
+            if not isinstance(source, str) or not isinstance(finding, str):
+                continue
+            source = source.strip()
+            finding = finding.strip()
+            if source and finding:
+                evidence.append({"source": source, "finding": finding})
+        return evidence
+    @staticmethod
     def _run_routing(case_id):
         case = VendorCase.query.get(case_id)
 
@@ -332,6 +351,9 @@ class WorkflowOrchestrator:
         decision_code = glm_result.get("decision_code")
         decision_reasoning = glm_result.get("decision_reasoning_summary", "")
         recommended_action = glm_result.get("recommended_procurement_action")
+        decision_evidence = WorkflowOrchestrator._normalize_decision_evidence(
+            glm_result.get("decision_evidence", [])
+        )
 
         # The LLM may recommend approval, but deterministic Python rules
         # can veto it before the decision is persisted.
@@ -372,6 +394,7 @@ class WorkflowOrchestrator:
             safety_gate_result=(
                 json.dumps(safety_gate_result) if safety_gate_result is not None else None
             ),
+            decision_evidence=json.dumps(decision_evidence),
             confidence_score=glm_result.get("confidence"),
         )
         db.session.add(decision)
@@ -394,6 +417,7 @@ class WorkflowOrchestrator:
             "confidence": glm_result.get("confidence"),
             "next_state": case.current_state,
             "safety_gate": safety_gate_result,
+            "decision_evidence": decision_evidence,
         }
 
     @staticmethod
