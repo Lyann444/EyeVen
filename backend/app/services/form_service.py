@@ -6,7 +6,11 @@ from flask import current_app
 
 from app.extensions import db
 from app.models import VendorCase, UploadedFile, EyeVenFormFieldValue
-from app.services.glm_service import GlmService, GlmServiceError, GlmSchemaValidationError
+from app.services.glm_service import (
+    GlmService,
+    GlmServiceError,
+    GlmSchemaValidationError,
+)
 from app.services.ocr_service import OcrService
 from app.prompts.canonical_form import CANONICAL_FORM_PROMPT
 from app.validators.agent_schemas import CANONICAL_FORM_SCHEMA
@@ -42,7 +46,12 @@ class FormService:
             logger.error("Canonical form GLM call failed for case %d: %s", case_id, e)
             case.current_state = "verification_blocked"
             db.session.commit()
-            return {"case_id": case_id, "status": "glm_failed", "error": str(e)}
+            return {
+                "case_id": case_id,
+                "status": "glm_failed",
+                "error": str(e),
+                "retryable": GlmService.is_retryable_error(e),
+            }
 
         FormService._persist_form_fields(
             case_id,

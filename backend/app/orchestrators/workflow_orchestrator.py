@@ -57,7 +57,36 @@ class WorkflowOrchestrator:
                 "stopping_reason": "terminal_case",
             }
 
-        if not UploadedFile.query.filter_by(vendor_case_id=case_id).first():
+        if case.current_state == "awaiting_pic_upload":
+            return {
+                "case_id": case_id,
+                "status": "awaiting_pic_upload",
+                "current_state": case.current_state,
+                "stages_run": [],
+                "results": {},
+                "trace": [],
+                "agentic_trace": [],
+                "stopping_reason": "awaiting_pic_upload",
+            }
+
+        uploaded_file = UploadedFile.query.filter_by(
+            vendor_case_id=case_id
+        ).first()
+        if case.current_state == "pending_follow_up" and EmailDraft.query.filter_by(
+            vendor_case_id=case_id
+        ).first():
+            return {
+                "case_id": case_id,
+                "status": "awaiting_vendor_information",
+                "current_state": case.current_state,
+                "stages_run": [],
+                "results": {},
+                "trace": [],
+                "agentic_trace": [],
+                "stopping_reason": "follow_up_created",
+            }
+
+        if not uploaded_file:
             result = {
                 "case_id": case_id,
                 "current_state": case.current_state,
@@ -65,15 +94,36 @@ class WorkflowOrchestrator:
                 "results": {},
                 "trace": [],
             }
-            if include_agentic:
-                agentic_trace, stopping_reason = WorkflowOrchestrator._run_agentic_loop(
-                    case_id
+            plan = {
+                "action": "request_pic_upload",
+                "reason": "No documents are attached; request the PIC to upload the case documents.",
+                "target_fields": [],
+                "target_stage": None,
+            }
+            started_at = datetime.utcnow()
+            started_clock = time.perf_counter()
+            execution = ActionExecutor.execute(case_id, plan)
+            case = VendorCase.query.get(case_id)
+            result["agentic_trace"] = [
+                WorkflowOrchestrator._trace_agentic_action(
+                    1,
+                    plan,
+                    plan["reason"],
+                    result["current_state"],
+                    case.current_state,
+                    execution["status"],
+                    result["current_state"] != case.current_state,
+                    started_at,
+                    started_clock,
+                    result=execution,
                 )
-                result["agentic_trace"] = agentic_trace
-                result["stopping_reason"] = stopping_reason
-                result["current_state"] = VendorCase.query.get(case_id).current_state
-            else:
-                result["stopping_reason"] = "awaiting_documents"
+            ]
+            result["current_state"] = case.current_state
+            result["stopping_reason"] = (
+                "awaiting_pic_upload"
+                if execution["status"] == "awaiting_pic_upload"
+                else execution["status"]
+            )
             return result
 
         results = {}
@@ -148,18 +198,36 @@ class WorkflowOrchestrator:
                 started_at=stage_started_at, started_clock=stage_started_clock,
             ))
 
+        deterministic_action_trace = None
+        deterministic_stopping_reason = None
+        extraction_warnings = results.get("extraction", {}).get("ocr_warnings", [])
         # Routing only runs after policy evaluation has successfully completed.
         if case.current_state == "routing_in_progress":
-            state_before = case.current_state
-            stage_started_at = datetime.utcnow()
-            stage_started_clock = time.perf_counter()
-            routing_result = WorkflowOrchestrator._run_routing(case_id)
-            results["routing"] = routing_result
-            case = VendorCase.query.get(case_id)
-            trace.append(WorkflowOrchestrator._trace_stage(
-                case_id, "routing", state_before, case.current_state, routing_result,
-                started_at=stage_started_at, started_clock=stage_started_clock,
-            ))
+            if extraction_warnings:
+                plan = {
+                    "action": "request_pic_upload",
+                    "reason": (
+                        "OCR was incomplete or uncertain; ask the PIC to correct "
+                        "the affected values or upload a clearer document."
+                    ),
+                    "target_fields": [],
+                    "target_stage": None,
+                }
+                (
+                    deterministic_action_trace,
+                    deterministic_stopping_reason,
+                ) = WorkflowOrchestrator._execute_deterministic_action(case_id, plan)
+            else:
+                state_before = case.current_state
+                stage_started_at = datetime.utcnow()
+                stage_started_clock = time.perf_counter()
+                routing_result = WorkflowOrchestrator._run_routing(case_id)
+                results["routing"] = routing_result
+                case = VendorCase.query.get(case_id)
+                trace.append(WorkflowOrchestrator._trace_stage(
+                    case_id, "routing", state_before, case.current_state, routing_result,
+                    started_at=stage_started_at, started_clock=stage_started_clock,
+                ))
 
         result = {
             "case_id": case_id,
@@ -169,44 +237,302 @@ class WorkflowOrchestrator:
             "trace": trace,
         }
         if include_agentic:
-            retryable_stages = {
-                "extraction",
-                "form_structuring",
-                "verification",
-                "policy_evaluation",
-            }
-            failed_stages = [
-                {
-                    "action": "reprocess_stage",
-                    "target_stage": stage,
-                    "target_fields": [],
-                    "outcome": stage_result.get("status"),
-                    "progress": False,
-                    "reason": f"Prior {stage} stage returned {stage_result.get('status')}.",
-                }
-                for stage, stage_result in results.items()
-                if stage in retryable_stages
-                and isinstance(stage_result, dict)
-                and stage_result.get("status") in {"failed", "glm_failed"}
-            ]
-            if failed_stages and case.current_state in {
-                "manual_review_required", "verification_blocked",
-            }:
+            recovery_attempts, failed_stage_actions = (
+                WorkflowOrchestrator._retry_retryable_stage_failures(
+                    case_id, results, trace
+                )
+            )
+            if recovery_attempts:
+                result["recovery_attempts"] = recovery_attempts
+            case = VendorCase.query.get(case_id)
+            if (
+                case.current_state == "verification_blocked"
+                and not failed_stage_actions
+            ):
+                WorkflowOrchestrator._route_to_manual_review(case_id)
+                case = VendorCase.query.get(case_id)
+
+            if failed_stage_actions and case.current_state == "manual_review_required":
                 state_before = case.current_state
                 case.current_state = "processing_failed"
                 db.session.commit()
                 trace.append(WorkflowOrchestrator._trace_stage(
                     case_id, "processing_failure_recovery", state_before,
-                    case.current_state, {"status": "retry_available"},
+                    case.current_state, {"status": "retry_exhausted"},
                 ))
-            agentic_trace, stopping_reason = WorkflowOrchestrator._run_agentic_loop(
-                case_id, initial_actions=failed_stages
-            )
-            result["agentic_trace"] = agentic_trace
-            result["stopping_reason"] = stopping_reason
+
+            if deterministic_action_trace is not None:
+                result["agentic_trace"] = deterministic_action_trace
+                result["stopping_reason"] = deterministic_stopping_reason
+            elif case.current_state in {
+                "completed", "rejected", "flagged_high_risk",
+                "manual_review_required",
+            }:
+                result["agentic_trace"] = []
+                result["stopping_reason"] = case.current_state
+            elif failed_stage_actions:
+                agentic_trace, stopping_reason = WorkflowOrchestrator._run_agentic_loop(
+                    case_id, initial_actions=failed_stage_actions
+                )
+                result["agentic_trace"] = agentic_trace
+                result["stopping_reason"] = stopping_reason
+            else:
+                snapshot = NextActionPlanner.case_snapshot(case_id, [])
+                if WorkflowOrchestrator._needs_pic_correction(snapshot, results):
+                    plan = {
+                        "action": "request_pic_upload",
+                        "reason": (
+                            "OCR was incomplete or uncertain; ask the PIC to correct "
+                            "the affected values or upload a clearer document."
+                        ),
+                        "target_fields": [],
+                        "target_stage": None,
+                    }
+                    agentic_trace, stopping_reason = (
+                        WorkflowOrchestrator._execute_deterministic_action(
+                            case_id, plan
+                        )
+                    )
+                    result["agentic_trace"] = agentic_trace
+                    result["stopping_reason"] = stopping_reason
+                else:
+                    plan = WorkflowOrchestrator._deterministic_recovery_plan(snapshot)
+                    if plan:
+                        agentic_trace, stopping_reason = (
+                            WorkflowOrchestrator._execute_deterministic_action(
+                                case_id, plan
+                            )
+                        )
+                        result["agentic_trace"] = agentic_trace
+                        result["stopping_reason"] = stopping_reason
+                    elif WorkflowOrchestrator._requires_agentic_planning(snapshot):
+                        agentic_trace, stopping_reason = (
+                            WorkflowOrchestrator._run_agentic_loop(case_id)
+                        )
+                        result["agentic_trace"] = agentic_trace
+                        result["stopping_reason"] = stopping_reason
+                    else:
+                        result["agentic_trace"] = []
+                        result["stopping_reason"] = "no_recovery_required"
             case = VendorCase.query.get(case_id)
             result["current_state"] = case.current_state
         return result
+
+    @staticmethod
+    def _retry_retryable_stage_failures(case_id, results, trace):
+        from app.orchestrators.reprocessing_orchestrator import (
+            ReprocessingOrchestrator,
+        )
+
+        attempts = []
+        failed_actions = []
+        pending = list(results.items())
+        processed_stages = set()
+        while pending:
+            stage, stage_result = pending.pop(0)
+            if (
+                stage in processed_stages
+                or not isinstance(stage_result, dict)
+                or stage_result.get("status") not in {"failed", "glm_failed"}
+                or stage_result.get("retryable") is not True
+            ):
+                continue
+            processed_stages.add(stage)
+
+            case = VendorCase.query.get(case_id)
+            state_before = case.current_state
+            started_at = datetime.utcnow()
+            started_clock = time.perf_counter()
+            try:
+                retry_result = ReprocessingOrchestrator.reprocess(
+                    case_id, stage, "automatic_retry"
+                )
+            except Exception as error:
+                logger.exception(
+                    "Automatic retry failed before execution for case %d at %s",
+                    case_id,
+                    stage,
+                )
+                retry_result = {
+                    "status": "not_started",
+                    "stage": stage,
+                    "error": str(error),
+                }
+                WorkflowOrchestrator._route_to_manual_review(case_id)
+
+            retry_status = retry_result.get("status", "failed")
+            if retry_result.get("stage_result_summary") is not None:
+                results[stage] = retry_result["stage_result_summary"]
+            attempts.append({
+                "stage": stage,
+                "status": retry_status,
+                "reprocessing_run_id": retry_result.get("reprocessing_run_id"),
+            })
+            case = VendorCase.query.get(case_id)
+            trace.append(WorkflowOrchestrator._trace_stage(
+                case_id,
+                "automatic_retry",
+                state_before,
+                case.current_state,
+                retry_result,
+                started_at=started_at,
+                started_clock=started_clock,
+            ))
+
+            if retry_status in {"failed", "retry_limit_reached"}:
+                failed_actions.append({
+                    "action": "reprocess_stage",
+                    "target_stage": stage,
+                    "target_fields": [],
+                    "outcome": "failed",
+                    "progress": False,
+                    "reason": (
+                        f"The single deterministic retry for {stage} did not "
+                        "resolve the technical failure."
+                    ),
+                    "result": {
+                        "status": retry_status,
+                        "stage": stage,
+                        "reprocessing_run_id": retry_result.get(
+                            "reprocessing_run_id"
+                        ),
+                    },
+                })
+            workflow_results = retry_result.get("workflow_result", {}).get(
+                "results", {}
+            )
+            pending.extend(
+                (downstream_stage, downstream_result)
+                for downstream_stage, downstream_result in workflow_results.items()
+                if downstream_stage not in processed_stages
+                and isinstance(downstream_result, dict)
+                and downstream_result.get("status") in {"failed", "glm_failed"}
+                and downstream_result.get("retryable") is True
+            )
+        return attempts, failed_actions
+
+    @staticmethod
+    def _needs_pic_correction(snapshot, results):
+        extraction = results.get("extraction") or {}
+        if extraction.get("ocr_warnings"):
+            return True
+        return any(
+            field.get("follow_up_eligible")
+            and field.get("status") == "low_confidence"
+            for field in snapshot.get("fields", [])
+        )
+
+    @staticmethod
+    def _deterministic_recovery_plan(snapshot):
+        candidates = snapshot.get("follow_up_candidates", [])
+        evidence_assessment = snapshot.get("case_evidence_assessment", {})
+        if not candidates or evidence_assessment.get("ambiguous_fields"):
+            return None
+        if evidence_assessment.get("documents_added_after_last_structuring"):
+            return None
+        if any(
+            candidate.get("availability") != "not_found_in_reviewed_documents"
+            for candidate in candidates
+        ):
+            return None
+        return {
+            "action": "request_information",
+            "reason": (
+                "Required information was not found after reviewing the submitted documents."
+            ),
+            "target_fields": [],
+            "target_stage": None,
+        }
+
+    @staticmethod
+    def _requires_agentic_planning(snapshot):
+        assessment = snapshot.get("case_evidence_assessment", {})
+        if (
+            assessment.get("ambiguous_fields")
+            or assessment.get("documents_added_after_last_structuring")
+        ):
+            return True
+        if any(
+            field.get("follow_up_eligible") and field.get("evidence_available")
+            for field in snapshot.get("fields", [])
+        ):
+            return True
+        verification = snapshot.get("verification") or {}
+        if (
+            verification.get("mismatch_severity") in {"moderate", "critical"}
+            or verification.get("critical_conflicts")
+        ):
+            return True
+        policy = snapshot.get("policy") or {}
+        return (
+            policy.get("risk_band") in {"high", "critical"}
+            or policy.get("blocking_issue_count", 0) > 0
+        )
+
+    @staticmethod
+    def _execute_deterministic_action(case_id, plan):
+        case = VendorCase.query.get(case_id)
+        state_before = case.current_state
+        started_at = datetime.utcnow()
+        started_clock = time.perf_counter()
+        try:
+            execution = ActionExecutor.execute(case_id, plan)
+        except Exception as error:
+            logger.exception(
+                "Deterministic recovery action failed for case %d", case_id
+            )
+            WorkflowOrchestrator._route_to_manual_review(case_id)
+            case = VendorCase.query.get(case_id)
+            return [
+                WorkflowOrchestrator._trace_agentic_action(
+                    1,
+                    plan,
+                    plan["reason"],
+                    state_before,
+                    case.current_state,
+                    "execution_failed",
+                    False,
+                    started_at,
+                    started_clock,
+                    failure_reason=str(error),
+                )
+            ], "manual_review_required"
+
+        case = VendorCase.query.get(case_id)
+        status = execution.get("status", "completed")
+        if status in {"failed", "error", "glm_failed", "blocked_terminal_case"}:
+            WorkflowOrchestrator._route_to_manual_review(case_id)
+            case = VendorCase.query.get(case_id)
+        trace = WorkflowOrchestrator._trace_agentic_action(
+            1,
+            plan,
+            plan["reason"],
+            state_before,
+            case.current_state,
+            status,
+            state_before != case.current_state,
+            started_at,
+            started_clock,
+            result=WorkflowOrchestrator._safe_agentic_result(execution),
+            failure_reason=(
+                f"Action returned {status}."
+                if status in {"failed", "error", "glm_failed", "blocked_terminal_case"}
+                else None
+            ),
+        )
+        if plan["action"] == "request_pic_upload" and status == "awaiting_pic_upload":
+            stopping_reason = "awaiting_pic_upload"
+        elif plan["action"] == "request_information" and status in {
+            "completed", "already_available",
+        }:
+            stopping_reason = "follow_up_created"
+        elif status == "glm_failed":
+            stopping_reason = "follow_up_generation_failed"
+        elif status in {"failed", "error", "blocked_terminal_case"}:
+            stopping_reason = "execution_failed"
+        else:
+            stopping_reason = "no_meaningful_progress"
+        return [trace], stopping_reason
 
     @staticmethod
     def _run_agentic_loop(case_id, initial_actions=None):
@@ -547,6 +873,15 @@ class WorkflowOrchestrator:
     @staticmethod
     def _summarize_extraction_result(result):
         extraction_results = result.get("extraction_results", [])
+        technical_failures = [
+            {
+                "file_id": item.get("file_id"),
+                "status": item.get("status", "unknown"),
+                "extraction_method": item.get("extraction_method", "unknown"),
+            }
+            for item in extraction_results
+            if item.get("status") != "completed"
+        ]
         ocr_warnings = [
             {
                 "file_id": item.get("file_id"),
@@ -572,23 +907,26 @@ class WorkflowOrchestrator:
                 in {"low_confidence", "unreadable"}
             )
         ]
-        failures = [
-            {
-                "file_id": item.get("file_id"),
-                "status": item.get("status", "unknown"),
-            }
-            for item in extraction_results
-            if item.get("status") != "completed"
-            and item.get("extraction_method") != "paddleocr"
-        ]
+        failures = technical_failures
+        retryable = bool(technical_failures) and all(
+            failure["extraction_method"] == "paddleocr"
+            and failure["status"].startswith("ocr_error:")
+            for failure in technical_failures
+        )
         return {
-            "status": "failed" if failures else "completed",
+            "status": "failed" if technical_failures else "completed",
             "current_state": result.get("current_state"),
             "files_processed": result.get("files_processed", 0),
             "zip_files_extracted": result.get("zip_files_extracted", 0),
             "failures": failures,
+            "technical_failures": technical_failures,
+            "retryable": retryable,
             "ocr_warnings": ocr_warnings,
         }
+
+    @staticmethod
+    def _is_retryable_glm_error(error):
+        return GlmService.is_retryable_error(error)
 
     @staticmethod
     def _has_unresolved_issues(snapshot):
@@ -706,7 +1044,11 @@ class WorkflowOrchestrator:
             logger.error("Verification GLM failed for case %d: %s", case_id, e)
             case.current_state = "manual_review_required"
             db.session.commit()
-            return {"status": "glm_failed", "error": str(e)}
+            return {
+                "status": "glm_failed",
+                "error": str(e),
+                "retryable": WorkflowOrchestrator._is_retryable_glm_error(e),
+            }
 
         mismatch_severity = WorkflowOrchestrator._normalized_verification_severity(
             glm_result
@@ -776,7 +1118,11 @@ class WorkflowOrchestrator:
             logger.error("Policy evaluation GLM failed for case %d: %s", case_id, e)
             case.current_state = "manual_review_required"
             db.session.commit()
-            return {"status": "glm_failed", "error": str(e)}
+            return {
+                "status": "glm_failed",
+                "error": str(e),
+                "retryable": WorkflowOrchestrator._is_retryable_glm_error(e),
+            }
 
         fields = EyeVenFormFieldValue.query.filter_by(
             vendor_case_id=case_id
@@ -825,9 +1171,6 @@ class WorkflowOrchestrator:
             for field in fields
         }
         optional_fields = set(CANONICAL_FIELD_NAMES) - FOLLOW_UP_FIELDS
-        outsourcing_declared = field_values.get(
-            "outsource_any_part_of_services", ""
-        ) in SafetyGate.AFFIRMATIVE_VALUES
         if field_values.get("iso_certification_available", "") not in SafetyGate.AFFIRMATIVE_VALUES:
             optional_fields.update({
                 "iso_certification_number",
@@ -842,16 +1185,28 @@ class WorkflowOrchestrator:
                 field_name = str(item.get("field_name") or "").casefold()
                 category = str(item.get("flag_type") or "").casefold()
                 description = str(item.get("description") or "").casefold()
-                text = " ".join(
-                    normalized_name(part)
-                    for part in (field_name, category, description)
-                )
+                if field_name and field_name in optional_fields:
+                    return True
+                if category in {
+                    "declaration_incomplete",
+                    "outsourcing_risk_flag",
+                }:
+                    return True
+                text = " ".join((field_name, category, description))
             else:
-                text = normalized_name(item)
-
-            if (
-                not outsourcing_declared
-                and "outsourcing_risk_flag" in text
+                text = str(item).casefold()
+            text = text.replace("_", " ")
+            if any(
+                marker in text
+                for marker in (
+                    "declaration",
+                    "outsourcing",
+                    "outsource",
+                    "legal dispute",
+                    "signatory",
+                    "company chop",
+                    "authorized signature",
+                )
             ):
                 return True
             if any(
@@ -902,9 +1257,19 @@ class WorkflowOrchestrator:
         if (
             removed_optional_issue
             and normalized["blocking_issue_count"] == 0
-            and result.get("risk_band") in {"high", "critical"}
+            and normalized["recoverable_issue_count"] == 0
+            and not normalized.get("risk_flags")
+            and not normalized.get("blocking_issues")
+            and not normalized.get("recoverable_issues")
         ):
-            normalized["risk_band"] = "medium"
+            normalized["risk_band"] = "low"
+            normalized["policy_summary"] = (
+                "No in-scope policy issues remain after excluding findings "
+                "outside the required vendor field scope."
+            )
+            normalized["recommended_next_step"] = (
+                "Proceed to routing based on the in-scope findings."
+            )
         return normalized
 
     @staticmethod
@@ -1010,7 +1375,11 @@ class WorkflowOrchestrator:
             logger.error("Routing GLM failed for case %d: %s", case_id, e)
             case.current_state = "manual_review_required"
             db.session.commit()
-            return {"status": "glm_failed", "error": str(e)}
+            return {
+                "status": "glm_failed",
+                "error": str(e),
+                "retryable": WorkflowOrchestrator._is_retryable_glm_error(e),
+            }
 
         decision_code = glm_result.get("decision_code")
         decision_reasoning = glm_result.get("decision_reasoning_summary", "")

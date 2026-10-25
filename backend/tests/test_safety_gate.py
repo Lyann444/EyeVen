@@ -109,6 +109,37 @@ class SafetyGateTests(unittest.TestCase):
             result["review_blockers"],
         )
 
+    def test_manual_correction_on_out_of_scope_field_does_not_block_approval(self):
+        fields = complete_fields()
+        declaration_date = make_field(
+            "declaration_date", status="low_confidence", value="2026-10-20"
+        )
+        declaration_date.notes = (
+            "PIC manual correction; not independently verified."
+        )
+        outsourcing_details = make_field(
+            "outsourcing_details", status="conflicting", value="Vendor A"
+        )
+        fields.extend([declaration_date, outsourcing_details])
+
+        result = SafetyGate.evaluate_results(verification(), policy(), fields)
+
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["review_blockers"], [])
+
+    def test_manual_correction_on_unclaimed_iso_details_is_out_of_scope(self):
+        fields = complete_fields()
+        iso_number = make_field(
+            "iso_certification_number", status="low_confidence", value="ISO-123"
+        )
+        iso_number.notes = "PIC manual correction; not independently verified."
+        fields.append(iso_number)
+
+        result = SafetyGate.evaluate_results(verification(), policy(), fields)
+
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["review_blockers"], [])
+
     def test_high_risk_case_cannot_be_auto_approved(self):
         result = SafetyGate.evaluate_results(
             verification(), policy(risk_band="high"), complete_fields()

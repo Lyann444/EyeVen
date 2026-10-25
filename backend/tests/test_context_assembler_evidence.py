@@ -127,6 +127,27 @@ class RoutingFieldEvidenceTests(unittest.TestCase):
             "contact_mobile_number",
         )
 
+    def test_verification_fields_only_include_in_scope_fields(self):
+        fields = [
+            field("company_registered_name", "matched_with_evidence", "Acme"),
+            field("declaration_date", "conflicting", "2026-10-20"),
+            field("outsourcing_details", "conflicting", "Vendor A"),
+            field("iso_certification_available", "matched_with_evidence", "No"),
+            field("iso_certification_number", "conflicting", "ISO-123"),
+            field("bank_account_number", "matched_with_evidence", "12345"),
+        ]
+
+        result = ContextAssembler._verification_fields(fields)
+
+        self.assertEqual(
+            [item.field_name for item in result],
+            [
+                "company_registered_name",
+                "iso_certification_available",
+                "bank_account_number",
+            ],
+        )
+
     def test_vendor_response_is_reported_without_remaining_unresolved(self):
         response = field("latest_annual_revenue_range", "low_confidence", "RM1M-5M")
         response.notes = (

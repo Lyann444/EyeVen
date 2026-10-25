@@ -7,9 +7,9 @@ after a follow-up.
 ## Overview
 
 EyeVen combines deterministic orchestration, structured GLM-based assessments,
-and a bounded planner. The normal workflow creates or refreshes the case
-evidence and assessment records. The planner then decides whether a specific
-recovery action is justified by the current evidence.
+and a bounded planner. Predictable cases are handled deterministically; the
+planner is reserved for ambiguous evidence, cross-stage interpretation, and
+recovery after a bounded retry fails.
 
 ```text
 Upload documents
@@ -21,7 +21,7 @@ Extraction -> Canonical form structuring -> Verification
                                       Policy evaluation -> Routing
                                                                |
                                                                v
-                                   Bounded next-action agentic loop
+                            Deterministic recovery / selective planner
                           /             |             |              \
                    Reprocess      Vendor draft    PIC upload     Human review
 ```
@@ -40,10 +40,12 @@ The orchestrator acquires a per-case lock to prevent overlapping workflow
 runs. If the case is already `completed`, `rejected`, or `flagged_high_risk`,
 the run stops without changing it.
 
-If there are no uploaded files, EyeVen does not attempt extraction. It invokes
-the planner, which can ask the PIC to upload documents and put the case in
-`awaiting_pic_upload`. Once documents are uploaded, the PIC starts the workflow
-to process them.
+If there are no uploaded files, EyeVen does not attempt extraction or invoke
+the planner. The action executor requests a PIC upload and persists
+`awaiting_pic_upload`. Repeated workflow calls remain waiting; an accepted
+upload changes the case to `intake_received`, allowing processing to resume.
+When a follow-up draft already exists, repeated workflow calls also remain
+waiting rather than planning another action.
 
 ## 2. Evidence processing stages
 
@@ -61,9 +63,13 @@ every stage on every request.
 
 PaddleOCR returns a recognition score for each text line. EyeVen summarizes
 those scores and treats a line below `0.6` as low-confidence OCR. This measures
-readability, not whether the vendor's value is factually correct. A low score
-or unreadable OCR result is surfaced as a PIC warning rather than treated as a
-failed workflow stage or proof that the vendor omitted the information.
+readability, not whether the vendor's value is factually correct. A technical
+OCR error is recorded as an extraction failure and is eligible for one
+deterministic retry when classified as transient. `ocr_unavailable`,
+unsupported formats, and other non-retryable failures are not retried.
+A completed OCR run with low-confidence or unreadable text is not treated as a
+technical failure or proof that the vendor omitted the information; the case
+waits for PIC correction or a clearer document instead.
 
 During form structuring, OCR scores are provided with the text. When a field's
 cited excerpt matches a low-scoring line, EyeVen marks that field
@@ -95,9 +101,13 @@ registry check.
 ### Policy evaluation
 
 The policy agent assesses completeness, risk flags, and blocking versus
-recoverable issues. Python normalization removes certain issues that are
-outside the applicable follow-up scope, including fields that are explicitly
-optional.
+recoverable issues. Only company registered name/number, website, main-office
+phone, bank account name/number and bank name, latest annual revenue range,
+contact email/mobile/person, ISO availability/number/expiry, SSM/ROC/ROB
+number, and tax/SST/GST number are in scope. ISO number and expiry apply only
+when certification is claimed. Other form fields, including outsourcing and
+declaration details, are excluded from verification, policy risk, and
+follow-up decisions.
 
 ### Routing
 
@@ -119,10 +129,14 @@ value is not automatically considered independently verified.
 
 ## 3. The bounded agentic loop
 
-After the normal stages, `WorkflowOrchestrator._run_agentic_loop` can run a
-short observe-plan-act-observe cycle. It also runs for cases with no documents,
-so the planner can request PIC upload instead of trying to process an empty
-case.
+After the normal stages, simple missing-field follow-ups are created
+deterministically only when all eligible unresolved fields are confirmed absent
+from reviewed documents and no ambiguous evidence is present. Low-confidence or
+unreadable OCR waits for PIC correction or a clearer upload instead of being
+treated as a missing field.
+`WorkflowOrchestrator._run_agentic_loop` is reserved for contextual recovery,
+including conflicting evidence, evidence that spans stages, and a failed
+bounded retry. Predictable failures do not invoke the planner unnecessarily.
 
 The maximum number of actions is configured by `MAX_AGENTIC_ACTIONS` and
 defaults to **3**. Each iteration works as follows.
@@ -138,6 +152,7 @@ defaults to **3**. Each iteration works as follows.
 - Which fields are eligible for vendor follow-up and their availability.
 - Verification, policy, and routing summaries.
 - Failed prior actions and successful stages whose inputs have not changed.
+- Persisted reprocessing attempts, including the result of any automatic retry.
 - Existing follow-up-draft count.
 
 The snapshot also classifies unresolved information. For example, it can
@@ -175,6 +190,12 @@ The planner is instructed to:
 - Avoid requesting optional fields, including authorized signature and company
   chop.
 
+Before planner invocation, explicitly retryable technical failures receive at
+most one automatic retry per stage and input fingerprint. The attempt and its
+outcome are stored in the existing reprocessing-run metadata, so the limit
+survives later workflow invocations. A changed input fingerprint may be
+processed as a new attempt; the same failed inputs cannot be retried again.
+
 ### C. Validate and guard the plan
 
 Before execution, EyeVen verifies the action name, target fields, and stage.
@@ -194,8 +215,10 @@ Identical actions against an unchanged snapshot are blocked.
 ### D. Act: execute through a bounded backend operation
 
 `ActionExecutor` dispatches the selected action to the corresponding service.
-For reprocessing, the reason is selected from context: recoverable failure,
-newly uploaded document, manual correction, or stale downstream results.
+For planner-requested reprocessing, the reason is selected from context:
+recoverable failure, newly uploaded document, manual correction, or stale
+downstream results. The deterministic technical retry uses a distinct
+`automatic_retry` reason and does not change the database schema.
 
 Reprocessing fingerprints stage inputs. If inputs match a previous successful
 run and this is not a failed-stage retry, EyeVen reports

@@ -24,7 +24,12 @@ class ActionExecutor:
         action = plan["action"]
         case = VendorCase.query.get_or_404(case_id)
         if (
-            action in {"reprocess_stage", "request_information", "manual_review"}
+            action in {
+                "reprocess_stage",
+                "request_pic_upload",
+                "request_information",
+                "manual_review",
+            }
             and case.current_state in {"completed", "rejected", "flagged_high_risk"}
         ):
             return {
@@ -37,6 +42,8 @@ class ActionExecutor:
             )
         if action == "reprocess_stage":
             return ActionExecutor._reprocess_stage(case_id, plan["target_stage"])
+        if action == "request_pic_upload":
+            return ActionExecutor._request_pic_upload(case_id)
         if action == "request_information":
             return ActionExecutor._request_information(case_id)
         if action == "manual_review":
@@ -44,6 +51,22 @@ class ActionExecutor:
         if action == "finish":
             return {"status": "finished"}
         raise ActionExecutorError(f"Unsupported planner action: {action!r}")
+
+    @staticmethod
+    def _request_pic_upload(case_id: int) -> dict:
+        case = VendorCase.query.get_or_404(case_id)
+        if case.current_state in {"completed", "rejected", "flagged_high_risk"}:
+            return {
+                "status": "blocked_terminal_case",
+                "current_state": case.current_state,
+            }
+        if case.current_state != "awaiting_pic_upload":
+            case.current_state = "awaiting_pic_upload"
+            db.session.commit()
+        return {
+            "status": "awaiting_pic_upload",
+            "current_state": case.current_state,
+        }
 
     @staticmethod
     def _targeted_verification(case_id: int, target_fields: list[str]) -> dict:

@@ -36,6 +36,7 @@ class ReprocessingOrchestrator:
         "new_vendor_information",
         "stale_downstream_results",
         "recoverable_failure",
+        "automatic_retry",
     }
     DOWNSTREAM_STAGES = {
         "extraction": ["form_structuring", "verification", "policy_evaluation", "routing"],
@@ -119,6 +120,23 @@ class ReprocessingOrchestrator:
         case = VendorCase.query.get_or_404(case_id)
         ReprocessingOrchestrator._validate_prerequisites(case_id, stage)
         input_fingerprint = ReprocessingOrchestrator._input_fingerprint(case_id, stage)
+        if (
+            reason == "automatic_retry"
+            and ReprocessingOrchestrator._automatic_retry_attempted(
+                case_id, stage, input_fingerprint
+            )
+        ):
+            return {
+                "action": "reprocess_stage",
+                "case_id": case_id,
+                "stage": stage,
+                "reason": reason,
+                "status": "retry_limit_reached",
+                "result_changed": False,
+                "downstream_stages_invalidated": [],
+                "downstream_stages_rerun": [],
+                "error": None,
+            }
         if reason != "recoverable_failure":
             previous_success = ReprocessingRun.query.filter_by(
                 vendor_case_id=case_id,
@@ -153,6 +171,7 @@ class ReprocessingOrchestrator:
                 "stage": stage,
                 "reason": reason,
                 "input_fingerprint": input_fingerprint,
+                "attempt": 1 if reason == "automatic_retry" else None,
             }),
             previous_case_state=previous_state,
             run_status="started",
@@ -161,6 +180,7 @@ class ReprocessingOrchestrator:
         case.current_state = "reprocessing"
         db.session.commit()
         before_result = ReprocessingOrchestrator._result_fingerprint(case_id)
+        stage_result = None
 
         try:
             from app.services.form_service import FormService
@@ -183,6 +203,11 @@ class ReprocessingOrchestrator:
             if stage_result.get("status") in {"failed", "glm_failed"}:
                 case = VendorCase.query.get(case_id)
                 case.current_state = "manual_review_required"
+                ReprocessingOrchestrator._update_run_metadata(
+                    reprocessing_run,
+                    result_status=stage_result.get("status"),
+                    retryable=stage_result.get("retryable", False),
+                )
                 reprocessing_run.run_status = "failed"
                 reprocessing_run.new_case_state = case.current_state
                 reprocessing_run.completed_at = datetime.utcnow()
@@ -199,6 +224,9 @@ class ReprocessingOrchestrator:
                     "downstream_stages_rerun": [],
                     "unresolved_issues": ReprocessingOrchestrator._unresolved_issues(case_id),
                     "requires_further_processing": True,
+                    "stage_result_summary": (
+                        ReprocessingOrchestrator._stage_result_summary(stage_result)
+                    ),
                 }
 
             workflow_result = (
@@ -207,6 +235,11 @@ class ReprocessingOrchestrator:
                 else WorkflowOrchestrator.run(case_id, include_agentic=False)
             )
             case = VendorCase.query.get(case_id)
+            ReprocessingOrchestrator._update_run_metadata(
+                reprocessing_run,
+                result_status=stage_result.get("status", "completed"),
+                retryable=stage_result.get("retryable", False),
+            )
             reprocessing_run.new_case_state = case.current_state
             reprocessing_run.run_status = "completed"
             reprocessing_run.completed_at = datetime.utcnow()
@@ -230,6 +263,9 @@ class ReprocessingOrchestrator:
                 "requires_further_processing": bool(unresolved),
                 "workflow_result": workflow_result,
                 "error": None,
+                "stage_result_summary": (
+                    ReprocessingOrchestrator._stage_result_summary(stage_result)
+                ),
             }
         except Exception as error:
             logger.exception(
@@ -238,6 +274,11 @@ class ReprocessingOrchestrator:
                 stage,
             )
             case = VendorCase.query.get(case_id)
+            ReprocessingOrchestrator._update_run_metadata(
+                reprocessing_run,
+                result_status="failed",
+                error_type=type(error).__name__,
+            )
             case.current_state = "manual_review_required"
             reprocessing_run.run_status = "failed"
             reprocessing_run.new_case_state = case.current_state
@@ -256,6 +297,11 @@ class ReprocessingOrchestrator:
                 "unresolved_issues": ReprocessingOrchestrator._unresolved_issues(case_id),
                 "requires_further_processing": True,
                 "error": str(error),
+                "stage_result_summary": (
+                    ReprocessingOrchestrator._stage_result_summary(stage_result)
+                    if stage_result is not None
+                    else None
+                ),
             }
 
     @staticmethod
@@ -283,10 +329,40 @@ class ReprocessingOrchestrator:
     @staticmethod
     def _run_metadata(run):
         try:
-            metadata = json.loads(run.reason_summary or "{}")
+            metadata = json.loads(getattr(run, "reason_summary", None) or "{}")
             return metadata if isinstance(metadata, dict) else {}
         except (TypeError, ValueError, json.JSONDecodeError):
             return {}
+
+    @staticmethod
+    def _update_run_metadata(run, **updates):
+        metadata = ReprocessingOrchestrator._run_metadata(run)
+        metadata.update(updates)
+        run.reason_summary = json.dumps(metadata)
+
+    @staticmethod
+    def _stage_result_summary(result):
+        if not isinstance(result, dict):
+            return {"status": "failed"}
+        allowed_keys = {
+            "status",
+            "retryable",
+            "failures",
+            "technical_failures",
+            "ocr_warnings",
+        }
+        return {key: value for key, value in result.items() if key in allowed_keys}
+
+    @staticmethod
+    def _automatic_retry_attempted(case_id, stage, input_fingerprint):
+        runs = ReprocessingRun.query.filter_by(vendor_case_id=case_id).all()
+        return any(
+            (metadata := ReprocessingOrchestrator._run_metadata(run)).get("reason")
+            == "automatic_retry"
+            and metadata.get("stage") == stage
+            and metadata.get("input_fingerprint") == input_fingerprint
+            for run in runs
+        )
 
     @staticmethod
     def _input_fingerprint(case_id, stage):

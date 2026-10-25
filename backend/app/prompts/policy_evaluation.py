@@ -15,26 +15,19 @@ ALLOWED INPUT CONTEXT:
 - Applicable onboarding rules
 
 POLICY AREAS TO EVALUATE:
-- Missing required registration information
-- Missing required tax or regulatory identifiers
+- Missing in-scope registration information
+- Missing in-scope tax or regulatory identifiers
 - ISO certification inconsistency or expiry risk when claimed
-- Incomplete declaration section
-- Suspicious or conflicting legal dispute declarations
-- Missing business-risk disclosure
-- Unresolved outsourcing disclosure where material
 - Insufficient evidence for critical vendor claims
 
 OPTIONAL-FIELD RULES:
-- Only unresolved fields in the follow-up scope below should count as recoverable completeness issues.
-- Registration type, business type, company registered address, business-type-other, legal-dispute details, outsourcing details, authorized signature present, signatory fields, declaration date, and company chop may be blank; their absence alone is not a risk or blocker.
-- Outsourcing details are only relevant when outsource_any_part_of_services is explicitly Yes. If it is No, missing outsourcing details must not produce an outsourcing risk flag or increase the risk band.
-- Do not treat fields outside the follow-up scope as blocking or recoverable solely because they are blank.
+- Only the fields in the follow-up scope below are in scope for completeness, verification risk, and policy findings.
+- Ignore every other form field, including registration type, business type, company registered address, legal-dispute fields, outsourcing fields, signature/signatory fields, declaration date, and company chop. Their absence, values, or mismatches must not affect risk flags, issue counts, risk band, summary, or recommended next step.
 - A field explicitly marked vendor_response_received=true was supplied by the PIC from the vendor's reply. A non-empty PIC manual correction is also a supplied value. Do not request either field again solely because its extraction status remains low confidence; continue evaluation using the recorded value and let evidence and verification determine whether human review is needed.
-- Authorized signature present and company chop present are optional and must never be requested as follow-up.
 - Follow-up scope: company_registered_name, company_registered_number, company_website, main_office_phone_number, bank_account_name, bank_account_number, bank_name, latest_annual_revenue_range, contact_email, contact_mobile_number, contact_person_name, iso_certification_available, iso_certification_expiry_date, iso_certification_number, ssm_roc_rob_number, tax_sst_gst_number. ISO number and expiry are only in scope when ISO certification is claimed.
 
 RISK FLAG CATEGORIES:
-identity_verification_gap, registration_gap, tax_identifier_gap, certification_missing, certification_expired, certification_unverifiable, declaration_incomplete, legal_risk_flag, outsourcing_risk_flag, evidence_conflict, low_confidence_case
+identity_verification_gap, registration_gap, tax_identifier_gap, certification_missing, certification_expired, certification_unverifiable, evidence_conflict, low_confidence_case
 
 RISK BAND MODEL:
 - low: complete and verified with no major concerns

@@ -13,6 +13,7 @@ ALLOWED INPUT CONTEXT:
 - Unresolved field list from the EyeVen form
 - Recoverable issues from policy evaluation
 - Evidence conflicts that require clarification
+- Internal registry result and local identifier-format checks
 - Vendor identity and contact data if available
 
 FOLLOW-UP EMAIL REQUIREMENTS:
@@ -66,6 +67,15 @@ FORBIDDEN BEHAVIOR:
   latest_annual_revenue_range, contact_email, contact_mobile_number,
   contact_person_name, iso_certification_available, iso_certification_expiry_date,
   iso_certification_number, ssm_roc_rob_number, tax_sst_gst_number.
+- If the internal registry result shows an exact match for tax_sst_gst_number,
+  treat that field as internally corroborated. Ignore external-verification or
+  local-format limitations for that matched value; they are not a mismatch,
+  recoverable issue, or reason to request tax information.
+- EyeVen does not contact an external tax registry. A tax check marked
+  partially verified, not assessed, or unavailable must not by itself trigger
+  a follow-up request. Request the tax identifier only if it is actually
+  missing or conflicting in the submitted/reviewed evidence and has no exact
+  internal-registry match.
 - Do not request ISO number or expiry when ISO certification is not claimed.
 - Never request registration type, business type, outsourcing details, authorized
   signature present, or company chop present.
@@ -85,6 +95,12 @@ RECOVERABLE ISSUES:
 
 EVIDENCE CONFLICTS:
 {evidence_conflicts}
+
+INTERNAL REGISTRY RESULT:
+{internal_registry}
+
+LOCAL/EXTERNAL VERIFICATION RESULT:
+{external_verification}
 
 VENDOR CONTACT:
 {vendor_contact}

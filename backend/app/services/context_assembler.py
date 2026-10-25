@@ -137,6 +137,7 @@ class ContextAssembler:
     @staticmethod
     def verification(case_id: int) -> dict:
         fields = EyeVenFormFieldValue.query.filter_by(vendor_case_id=case_id).all()
+        in_scope_fields = ContextAssembler._verification_fields(fields)
 
         form_fields = json.dumps([
             {
@@ -150,11 +151,11 @@ class ContextAssembler:
                 "confidence_score": float(fv.confidence_score) if fv.confidence_score else None,
                 "source_excerpt": fv.source_excerpt,
             }
-            for fv in fields
+            for fv in in_scope_fields
         ], indent=2)
 
         mismatches = [
-            fv for fv in fields
+            fv for fv in in_scope_fields
             if fv.status in ("mismatched_with_evidence", "conflicting", "unverifiable")
         ]
         alignment_report = json.dumps({
@@ -162,7 +163,6 @@ class ContextAssembler:
             "mismatches": [
                 {"field_name": m.field_name, "status": m.status}
                 for m in mismatches
-                if m.field_name in FOLLOW_UP_FIELDS
             ],
         }, indent=2)
         internal_registry = InternalRegistryService.match_vendor(case_id)
@@ -176,6 +176,17 @@ class ContextAssembler:
             "internal_registry": json.dumps(internal_registry, indent=2),
             "external_verification": json.dumps(format_checks, indent=2),
         }
+
+    @staticmethod
+    def _verification_fields(fields):
+        field_values = {
+            field.field_name: SafetyGate._field_value(field)
+            for field in fields
+        }
+        return [
+            field for field in fields
+            if SafetyGate.is_in_scope_field(field, field_values)
+        ]
 
     @staticmethod
     def policy_evaluation(case_id: int) -> dict:
@@ -338,6 +349,10 @@ class ContextAssembler:
     @staticmethod
     def follow_up(case_id: int) -> dict:
         case = VendorCase.query.get_or_404(case_id)
+        internal_registry = InternalRegistryService.match_vendor(case_id)
+        external_verification = ExternalVerificationService.verify_identifiers(
+            case_id, internal_registry_match=internal_registry
+        )
         latest_routing = RoutingDecision.query.filter_by(
             vendor_case_id=case_id
         ).order_by(RoutingDecision.created_at.desc()).first()
@@ -383,4 +398,6 @@ class ContextAssembler:
                 f.field_name for f in unresolved if f.status == "conflicting"
             ]),
             "vendor_contact": json.dumps(contact_map, indent=2),
+            "internal_registry": json.dumps(internal_registry, indent=2),
+            "external_verification": json.dumps(external_verification, indent=2),
         }

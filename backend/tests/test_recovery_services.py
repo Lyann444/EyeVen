@@ -506,6 +506,149 @@ class RecoveryServiceTests(unittest.TestCase):
         self.assertTrue(result["requires_further_processing"])
         run_verification.assert_not_called()
 
+    def test_automatic_retry_limit_persists_for_same_stage_and_input(self):
+        previous_attempt = SimpleNamespace(reason_summary=json.dumps({
+            "stage": "verification",
+            "reason": "automatic_retry",
+            "input_fingerprint": "same-input",
+            "attempt": 1,
+        }))
+        reprocessing_run_model = SimpleNamespace(
+            query=SimpleNamespace(
+                filter_by=Mock(
+                    return_value=SimpleNamespace(
+                        all=Mock(return_value=[previous_attempt])
+                    )
+                )
+            )
+        )
+        with (
+            patch(
+                "app.orchestrators.reprocessing_orchestrator.VendorCase",
+                new=SimpleNamespace(query=SimpleNamespace(
+                    get_or_404=Mock(return_value=SimpleNamespace(
+                        current_state="verification_blocked"
+                    ))
+                )),
+            ),
+            patch(
+                "app.orchestrators.reprocessing_orchestrator.ReprocessingRun",
+                new=reprocessing_run_model,
+            ),
+            patch.object(ReprocessingOrchestrator, "_validate_prerequisites"),
+            patch.object(
+                ReprocessingOrchestrator,
+                "_input_fingerprint",
+                return_value="same-input",
+            ),
+            patch("app.orchestrators.reprocessing_orchestrator.db.session.add") as add,
+        ):
+            result = ReprocessingOrchestrator.reprocess(
+                31, "verification", "automatic_retry"
+            )
+
+        self.assertEqual(result["status"], "retry_limit_reached")
+        add.assert_not_called()
+
+    def test_automatic_retry_failure_persists_attempt_metadata(self):
+        case = SimpleNamespace(current_state="policy_evaluated")
+        prior_runs = SimpleNamespace(
+            all=Mock(return_value=[]),
+            order_by=Mock(),
+        )
+        prior_runs.order_by.return_value = prior_runs
+
+        class FakeReprocessingRun:
+            created_runs = []
+            started_at = SimpleNamespace(desc=Mock(return_value="started_at_desc"))
+            query = SimpleNamespace(
+                filter_by=Mock(return_value=prior_runs)
+            )
+
+            def __init__(self, **values):
+                self.__dict__.update(values)
+                self.id = 44
+                self.created_runs.append(self)
+
+        def fail_routing(_case_id):
+            case.current_state = "manual_review_required"
+            return {
+                "status": "glm_failed",
+                "retryable": True,
+                "error": "temporary API timeout",
+            }
+
+        with (
+            patch(
+                "app.orchestrators.reprocessing_orchestrator.VendorCase",
+                new=SimpleNamespace(query=SimpleNamespace(
+                    get_or_404=Mock(return_value=case),
+                    get=Mock(return_value=case),
+                )),
+            ),
+            patch(
+                "app.orchestrators.reprocessing_orchestrator.ReprocessingRun",
+                new=FakeReprocessingRun,
+            ),
+            patch.object(ReprocessingOrchestrator, "_validate_prerequisites"),
+            patch.object(
+                ReprocessingOrchestrator,
+                "_input_fingerprint",
+                return_value="same-input",
+            ),
+            patch.object(
+                ReprocessingOrchestrator,
+                "_result_fingerprint",
+                return_value="result",
+            ),
+            patch.object(
+                ReprocessingOrchestrator,
+                "_unresolved_issues",
+                return_value=[],
+            ),
+            patch.object(WorkflowOrchestrator, "_run_routing", side_effect=fail_routing),
+            patch("app.orchestrators.reprocessing_orchestrator.db.session.add"),
+            patch("app.orchestrators.reprocessing_orchestrator.db.session.commit"),
+        ):
+            result = ReprocessingOrchestrator.reprocess(
+                31, "routing", "automatic_retry"
+            )
+
+        self.assertEqual(result["reprocessing_run_id"], 44)
+        self.assertEqual(result["status"], "failed")
+        metadata = json.loads(FakeReprocessingRun.created_runs[0].reason_summary)
+        self.assertEqual(metadata["reason"], "automatic_retry")
+        self.assertEqual(metadata["attempt"], 1)
+        self.assertEqual(metadata["input_fingerprint"], "same-input")
+        self.assertEqual(metadata["result_status"], "glm_failed")
+        self.assertTrue(metadata["retryable"])
+
+    def test_automatic_retry_can_follow_changed_input(self):
+        previous_attempt = SimpleNamespace(reason_summary=json.dumps({
+            "stage": "verification",
+            "reason": "automatic_retry",
+            "input_fingerprint": "old-input",
+            "attempt": 1,
+        }))
+        reprocessing_run_model = SimpleNamespace(
+            query=SimpleNamespace(
+                filter_by=Mock(
+                    return_value=SimpleNamespace(
+                        all=Mock(return_value=[previous_attempt])
+                    )
+                )
+            )
+        )
+        with patch(
+            "app.orchestrators.reprocessing_orchestrator.ReprocessingRun",
+            new=reprocessing_run_model,
+        ):
+            self.assertFalse(
+                ReprocessingOrchestrator._automatic_retry_attempted(
+                    31, "verification", "new-input"
+                )
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -98,6 +98,26 @@ class NextActionPlannerTests(unittest.TestCase):
         self.assertEqual(result["target_stage"], "extraction")
         self.assertIn("Prior extraction stage returned failed", call_glm.call_args.kwargs["prompt"])
 
+    def test_reprocessing_is_blocked_after_automatic_retry_exhaustion(self):
+        snapshot = {
+            "fields": [],
+            "prior_actions": [{
+                "action": "reprocess_stage",
+                "target_stage": "verification",
+                "outcome": "failed",
+            }],
+            "retry_exhausted_stages": ["verification"],
+            "unchanged_successful_stages": [],
+        }
+
+        with self.assertRaisesRegex(
+            NextActionPlannerError, "automatic retry is exhausted"
+        ):
+            NextActionPlanner.validate_plan_for_case(
+                plan("reprocess_stage", target_stage="verification"),
+                snapshot,
+            )
+
     def test_invalid_request_information_targets_fall_back_to_snapshot_decision(self):
         snapshot = {
             "fields": [{
@@ -473,6 +493,26 @@ class NextActionPlannerTests(unittest.TestCase):
         ):
             result = ActionExecutor.execute(12, plan("request_information"))
         self.assertEqual(result["status"], "blocked_terminal_case")
+
+    def test_pic_upload_action_persists_waiting_state(self):
+        case = SimpleNamespace(current_state="verification_completed")
+        with (
+            patch(
+                "app.services.action_executor.VendorCase",
+                new=SimpleNamespace(
+                    query=SimpleNamespace(get_or_404=Mock(return_value=case))
+                ),
+            ),
+            patch("app.services.action_executor.db.session.commit") as commit,
+        ):
+            result = ActionExecutor.execute(12, plan("request_pic_upload"))
+
+        self.assertEqual(result, {
+            "status": "awaiting_pic_upload",
+            "current_state": "awaiting_pic_upload",
+        })
+        self.assertEqual(case.current_state, "awaiting_pic_upload")
+        commit.assert_called_once()
 
     def test_internal_registry_can_match_one_targeted_identifier(self):
         field = SimpleNamespace(

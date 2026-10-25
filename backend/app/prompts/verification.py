@@ -19,28 +19,30 @@ VERIFICATION SOURCE RULES:
 - When the internal registry reports a match, treat the matched registration identifiers as corroborated and do not call them unverifiable because an external lookup was not performed.
 - A skipped SSM format check due to an internal registry match is not a failure.
 - Use the internal registry field comparison results: an exact SSM or tax identifier match is internally corroborated and must not be described as a mismatch. This is internal corroboration, not external verification.
-- A local tax-format result of "partially_verified" means the format is plausible but no external check was performed; it is not evidence that the tax number is invalid or mismatched.
+- When tax_sst_gst_number has an exact internal registry match, ignore any external/local tax-verification limitation for that value. Do not lower confidence, report a gap, or recommend follow-up solely because the external tax check is partial, unavailable, or not performed.
+- A local tax-format result of "partially_verified" means the format is plausible but no external check was performed; it is not evidence that the tax number is invalid or mismatched. EyeVen does not contact an external tax registry.
 - For tax/SST/GST comparisons, ignore case, spaces, hyphens, and punctuation. Matching alphanumeric identifier content is formatting-only, not a discrepancy.
 - For ISO certification details, compare certificate numbers after trimming whitespace and compare expiry dates as calendar dates; equivalent formats such as "09 January 2027" and "2027-01-09" are the same date. Do not report a discrepancy when the certificate number and date agree across the supplied form and certificate.
 - Ignore case, whitespace, and punctuation when comparing company names and registration identifiers. For an SSM/ROC identifier consisting of a 12-digit modern registration number and an optional parenthesized legacy number, compare the 12-digit number; the optional legacy suffix alone is not a mismatch.
 - Treat company-name differences such as "Sdn.Bhd." versus "Sdn Bhd" as formatting only. Flag a name mismatch only when the substantive company name differs.
-- Assess tax identifiers and ISO certificate details separately; an internal company-registry match does not verify tax or ISO status.
+- Assess tax identifiers and ISO certificate details separately. An internal registry match only corroborates fields that have an exact match in its field_comparisons; do not generalize it to unmatched fields.
+- Only compare and report findings for these fields: company_registered_name, company_registered_number, company_website, main_office_phone_number, bank_account_name, bank_account_number, bank_name, latest_annual_revenue_range, contact_email, contact_mobile_number, contact_person_name, iso_certification_available, iso_certification_expiry_date, iso_certification_number, ssm_roc_rob_number, tax_sst_gst_number. ISO number and expiry apply only when certification is claimed.
+- Ignore all other form fields and any mismatches or formatting differences in them. They must not affect legitimacy status, mismatch severity, missing-field findings, confidence, or recommended next step.
 - Only treat the following as critical missing information for follow-up: company_registered_name, company_registered_number, company_website, main_office_phone_number, bank_account_name, bank_account_number, bank_name, latest_annual_revenue_range, contact_email, contact_mobile_number, contact_person_name, iso_certification_available, iso_certification_expiry_date, iso_certification_number, ssm_roc_rob_number, tax_sst_gst_number. ISO number and expiry apply only when certification is claimed.
-- Blank registration type, business type, company registered address, outsourcing details, authorized signature present, signatory fields, declaration date, or company chop alone must not be described as a critical gap or mismatch.
 
 MISMATCH SEVERITY RULES — YOU MUST FOLLOW THESE:
 - Set mismatch_severity to "minor" when there are no meaningful mismatches or conflicts. Use null only when evidence is insufficient to classify severity; a null severity requires manual review.
 
 1. Minor mismatch → do NOT reject
-   Examples: company name abbreviation differs slightly, address formatting differs, OCR read one field unclearly, one field is missing in one document but present in another
-   Action: mark as clarification-worthy, recommend follow-up, do NOT reject
+   Examples: company name abbreviation differs slightly or OCR reads an in-scope field unclearly
+   Action: do NOT reject; recommend follow-up only for an unresolved in-scope field eligible for follow-up
 
 2. Moderate mismatch → do NOT auto reject
-   Examples: company name in form does not fully match ISO certificate, registration number in form differs from supporting document, signatory name or bank-related entity looks inconsistent, internal registry and submitted form do not align
+   Examples: registered company number in form differs from supporting evidence, bank account name or number conflicts with its supporting document, internal registry and submitted in-scope identifier do not align
    Action: mark as suspicious/inconsistent, recommend high-risk flagging or manual review, do NOT auto-complete the case
 
 3. Critical mismatch or unverifiable information → reject path candidate
-   Examples: SSM number cannot be verified, tax/SST number is invalid, certificate is expired or appears unrelated to the vendor, company in form and company in official documents are clearly different entities, external verification fails and vendor cannot justify it
+   Examples: an in-scope identifier has a substantive contradiction in reviewed evidence, certificate is expired or appears unrelated to the vendor, company in form and company in official documents are clearly different entities
    Action: mark as materially unsafe, recommend rejection
 
 OUTPUT SCHEMA:

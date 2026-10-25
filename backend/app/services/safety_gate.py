@@ -148,16 +148,20 @@ class SafetyGate:
         return values.get(condition, "") in SafetyGate.AFFIRMATIVE_VALUES
 
     @staticmethod
-    def is_follow_up_needed(field, values=None) -> bool:
+    def is_in_scope_field(field, values=None) -> bool:
         if field.field_name not in FOLLOW_UP_FIELDS:
             return False
-        if SafetyGate.has_pic_supplied_value(field):
-            return False
+        condition = SafetyGate.CONDITIONAL_FIELDS.get(field.field_name)
+        return condition is None or SafetyGate._condition_applies(
+            condition, values or {}, None
+        )
+
+    @staticmethod
+    def is_follow_up_needed(field, values=None) -> bool:
         values = values or {}
-        if field.field_name in {
-            "iso_certification_number",
-            "iso_certification_expiry_date",
-        } and values.get("iso_certification_available", "") not in SafetyGate.AFFIRMATIVE_VALUES:
+        if not SafetyGate.is_in_scope_field(field, values):
+            return False
+        if SafetyGate.has_pic_supplied_value(field):
             return False
         unresolved_statuses = (
             SafetyGate.RECOVERABLE_FIELD_STATUSES
@@ -280,6 +284,8 @@ class SafetyGate:
         # Known contradictions or unreliable evidence block approval even when
         # the affected field is not in the required-field list.
         for field in fields:
+            if not SafetyGate.is_in_scope_field(field, values):
+                continue
             notes = getattr(field, "notes", None) or ""
             manually_corrected = (
                 "PIC manual correction; not independently verified." in notes

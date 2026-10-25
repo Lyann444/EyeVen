@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import time
 
 import requests
@@ -31,6 +32,15 @@ class GlmApiError(GlmServiceError):
 
 
 class GlmService:
+    @staticmethod
+    def is_retryable_error(error: Exception) -> bool:
+        if not isinstance(error, GlmApiError):
+            return False
+        message = str(error).lower()
+        return "timeout" in message or bool(
+            re.search(r"\b(?:429|5\d\d)\b", message)
+        )
+
     @staticmethod
     def call_glm(
         prompt: str,

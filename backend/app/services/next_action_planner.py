@@ -84,6 +84,8 @@ class NextActionPlanner:
             for action in snapshot.get("prior_actions", [])
             if action.get("action") == "reprocess_stage"
             and action.get("outcome") in {"failed", "glm_failed"}
+            and action.get("target_stage")
+            not in snapshot.get("retry_exhausted_stages", [])
             and action.get("target_stage") in SUPPORTED_STAGES
         ]
         for stage in failed_stages:
@@ -249,6 +251,10 @@ class NextActionPlanner:
 
         if plan["action"] == "reprocess_stage":
             stage = plan["target_stage"]
+            if stage in snapshot.get("retry_exhausted_stages", []):
+                raise NextActionPlannerError(
+                    f"Cannot reprocess {stage}: its one automatic retry is exhausted for unchanged inputs"
+                )
             failed_stages = {
                 action.get("target_stage")
                 for action in snapshot.get("prior_actions", [])
@@ -379,31 +385,51 @@ class NextActionPlanner:
         }
 
         unchanged_successful_stages = set()
-        completed_reprocessing_runs = ReprocessingRun.query.filter_by(
-            vendor_case_id=case_id,
-            run_status="completed",
+        reprocessing_runs = ReprocessingRun.query.filter_by(
+            vendor_case_id=case_id
         ).all()
-        if completed_reprocessing_runs:
-            from app.orchestrators.reprocessing_orchestrator import (
-                ReprocessingOrchestrator,
-            )
-
-            current_fingerprints = {
-                stage: ReprocessingOrchestrator._input_fingerprint(case_id, stage)
-                for stage in SUPPORTED_STAGES
-            }
-            for run in completed_reprocessing_runs:
-                try:
-                    metadata = json.loads(run.reason_summary or "{}")
-                except (TypeError, ValueError, json.JSONDecodeError):
-                    continue
-                stage = metadata.get("stage") if isinstance(metadata, dict) else None
-                if (
-                    stage in current_fingerprints
-                    and metadata.get("input_fingerprint")
-                    == current_fingerprints[stage]
-                ):
-                    unchanged_successful_stages.add(stage)
+        from app.orchestrators.reprocessing_orchestrator import (
+            ReprocessingOrchestrator,
+        )
+        run_metadata = [
+            (run, ReprocessingOrchestrator._run_metadata(run))
+            for run in reprocessing_runs
+        ]
+        stages_with_history = {
+            metadata.get("stage")
+            for _, metadata in run_metadata
+            if metadata.get("stage") in SUPPORTED_STAGES
+        }
+        current_fingerprints = {
+            stage: ReprocessingOrchestrator._input_fingerprint(case_id, stage)
+            for stage in stages_with_history
+        }
+        recovery_history = []
+        retry_exhausted_stages = set()
+        for run, metadata in run_metadata:
+            stage = metadata.get("stage")
+            reason = metadata.get("reason")
+            input_fingerprint = metadata.get("input_fingerprint")
+            if stage not in SUPPORTED_STAGES:
+                continue
+            if (
+                run.run_status == "completed"
+                and input_fingerprint == current_fingerprints[stage]
+            ):
+                unchanged_successful_stages.add(stage)
+            recovery_history.append({
+                "stage": stage,
+                "reason": reason,
+                "attempt": metadata.get("attempt"),
+                "run_status": run.run_status,
+                "result_status": metadata.get("result_status"),
+            })
+            if (
+                reason == "automatic_retry"
+                and run.run_status in {"started", "failed"}
+                and input_fingerprint == current_fingerprints[stage]
+            ):
+                retry_exhausted_stages.add(stage)
         if not documents_added_after_structuring:
             for action in prior_actions:
                 result = action.get("result")
@@ -514,6 +540,8 @@ class NextActionPlanner:
                 ],
             },
             "unchanged_successful_stages": sorted(unchanged_successful_stages),
+            "recovery_history": recovery_history,
+            "retry_exhausted_stages": sorted(retry_exhausted_stages),
             "verification": {
                 "legitimacy_status": verification.legitimacy_status,
                 "mismatch_severity": verification.mismatch_severity,
