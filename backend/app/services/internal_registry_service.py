@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import re
 
 from app.extensions import db
 from app.models import EyeVenFormFieldValue, VendorCase
@@ -26,6 +27,16 @@ MOCK_REGISTRY = [
         "tax_sst_gst_number": "SST9876543",
         "company_email": "admin@nusantarasolutions.com",
         "contact_person_name": "Lim Wei Chong",
+        "business_type": "Sdn Bhd",
+    },
+    {
+        "vendor_number": "V-20021",
+        "company_registered_name": "Apex Office Supplies Sdn. Bhd.",
+        "company_registered_number": "201901045678",
+        "ssm_roc_rob_number": "201901045678",
+        "tax_sst_gst_number": "B16-1808-32001114",
+        "company_email": "sales@apexoffice.com.my",
+        "contact_person_name": "Nur Aisyah Rahman",
         "business_type": "Sdn Bhd",
     },
     {
