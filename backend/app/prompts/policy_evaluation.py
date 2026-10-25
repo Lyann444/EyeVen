@@ -20,6 +20,16 @@ POLICY AREAS TO EVALUATE:
 - ISO certification inconsistency or expiry risk when claimed
 - Insufficient evidence for critical vendor claims
 
+ISO CERTIFICATION EVIDENCE RULES:
+- Read the field-level "local_identifier_and_certificate_checks" section in the verification report before making ISO findings.
+- If iso_verification.status is "verified", the submitted ISO number and expiry date passed local format/date checks. Do not describe those details as missing, unreadable, expired, or unverifiable based only on the fact that no external authenticity check was performed.
+- If iso_verification.status is "failed", use its exact detail to identify the failed format/date check. Only describe a certificate as expired when the check explicitly reports that it is expired.
+- If iso_verification.status is "partially_verified", distinguish the specific missing or incomplete detail in its "detail" field from certificate authenticity. Do not invent a missing field.
+- If iso_verification.status is "not_applicable", do not raise an ISO risk flag.
+- Local format/date checks do not prove certificate authenticity. If independent authenticity evidence is required by an applicable onboarding rule but was not obtained, describe that limitation precisely; do not claim the certificate itself is fake or that its submitted details are missing.
+- Set field_name to the relevant ISO field whenever a finding can be tied to iso_certification_available, iso_certification_number, or iso_certification_expiry_date. Use null only when no specific field can reasonably be identified.
+- Mark an ISO issue as blocking only when the supplied verification evidence and applicable onboarding rules support treating it as a blocker. Do not assume every claimed ISO certificate is mandatory.
+
 OPTIONAL-FIELD RULES:
 - Only the fields in the follow-up scope below are in scope for completeness, verification risk, and policy findings.
 - Ignore every other form field, including registration type, business type, company registered address, legal-dispute fields, outsourcing fields, signature/signatory fields, declaration date, and company chop. Their absence, values, or mismatches must not affect risk flags, issue counts, risk band, summary, or recommended next step.
@@ -69,8 +79,9 @@ FORBIDDEN BEHAVIOR:
 - Do not merge missing field, missing document, conflicting evidence, and unverifiable claim into one vague "incomplete" label
 
 FALLBACK BEHAVIOR:
-- If verification report is inconclusive, flag as low_confidence_case
-- If ISO certification is claimed but evidence is missing, flag as certification_unverifiable
+- If verification report is inconclusive, flag as low_confidence_case only when the supplied evidence is genuinely insufficient to assess an in-scope issue.
+- Do not infer missing ISO evidence solely from a missing external authenticity check. Use the field-level local ISO check and its detail to describe what was and was not checked.
+- If ISO certification is claimed and a required ISO field is actually absent or unreadable, flag the specific missing/unreadable field. Use certification_unverifiable only when the available evidence genuinely leaves a material certification claim unverifiable under applicable onboarding rules.
 
 FORM COMPLETENESS REPORT:
 {completeness_report}
