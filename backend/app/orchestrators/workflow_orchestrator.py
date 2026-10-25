@@ -1244,6 +1244,58 @@ class WorkflowOrchestrator:
                     retained.append(item)
             normalized[key] = retained
 
+        # Lack of an external certificate-authenticity integration is a
+        # verification limitation, not evidence that an ISO certificate is
+        # invalid. Do not let that limitation alone become a blocking issue.
+        def is_external_authenticity_limitation(item):
+            if isinstance(item, dict):
+                field_name = str(item.get("field_name") or "").casefold()
+                flag_type = str(item.get("flag_type") or "").casefold()
+                description = str(item.get("description") or "").casefold()
+                text = " ".join((field_name, flag_type, description))
+            else:
+                text = str(item).casefold()
+            text = text.replace("_", " ")
+            mentions_iso = any(term in text for term in (
+                "iso", "certification", "certificate",
+            ))
+            mentions_external_limit = any(term in text for term in (
+                "not externally verified",
+                "not externally authenticated",
+                "authenticity was not confirmed",
+                "authenticity could not be confirmed",
+                "external verification unavailable",
+                "no external verification",
+                "not independently verified",
+                "not independently authenticated",
+            ))
+            describes_actual_failure = any(term in text for term in (
+                "expired", "missing", "not provided", "invalid format",
+                "malformed", "field is absent",
+            ))
+            return mentions_iso and mentions_external_limit and not describes_actual_failure
+
+        retained_flags = []
+        downgraded_authenticity_limitations = False
+        for flag in normalized.get("risk_flags", []):
+            if is_external_authenticity_limitation(flag) and isinstance(flag, dict):
+                flag = dict(flag)
+                flag["severity"] = "warning"
+                flag["description"] = (
+                    str(flag.get("description") or "").strip()
+                    + " External authenticity was not checked by this system; "
+                    "this limitation alone is not evidence of certificate invalidity."
+                ).strip()
+                downgraded_authenticity_limitations = True
+            retained_flags.append(flag)
+        normalized["risk_flags"] = retained_flags
+
+        for key in ("blocking_issues", "recoverable_issues"):
+            normalized[key] = [
+                item for item in normalized.get(key, [])
+                if not is_external_authenticity_limitation(item)
+            ]
+
         risk_flags = normalized.get("risk_flags", [])
         blocking_flag_count = sum(
             1 for flag in risk_flags
@@ -1261,20 +1313,32 @@ class WorkflowOrchestrator:
         )
 
         if (
-            removed_optional_issue
-            and normalized["blocking_issue_count"] == 0
+            normalized["blocking_issue_count"] == 0
             and normalized["recoverable_issue_count"] == 0
-            and not normalized.get("risk_flags")
+            and not any(
+                isinstance(flag, dict)
+                and flag.get("severity") in {"blocking", "recoverable"}
+                for flag in normalized.get("risk_flags", [])
+            )
             and not normalized.get("blocking_issues")
             and not normalized.get("recoverable_issues")
+            and (removed_optional_issue or downgraded_authenticity_limitations)
         ):
-            normalized["risk_band"] = "low"
+            normalized["risk_band"] = "medium" if downgraded_authenticity_limitations else "low"
             normalized["policy_summary"] = (
-                "No in-scope policy issues remain after excluding findings "
+                "No blocking or recoverable in-scope issues remain. ISO certificate "
+                "authenticity was not externally checked; this is recorded as a "
+                "verification limitation, not as evidence that the certificate is invalid."
+                if downgraded_authenticity_limitations
+                else "No in-scope policy issues remain after excluding findings "
                 "outside the required vendor field scope."
             )
             normalized["recommended_next_step"] = (
-                "Proceed to routing based on the in-scope findings."
+                "Continue routing with the external-authenticity limitation disclosed; "
+                "use manual review only if applicable onboarding policy requires independent "
+                "certificate verification."
+                if downgraded_authenticity_limitations
+                else "Proceed to routing based on the in-scope findings."
             )
         return normalized
 
