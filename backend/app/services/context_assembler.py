@@ -260,14 +260,31 @@ class ContextAssembler:
             ],
         }, indent=2)
 
-        verification_report = "No verification run yet"
+        verification_summary = None
         if latest_verification:
-            verification_report = json.dumps({
+            verification_summary = {
                 "legitimacy_status": latest_verification.legitimacy_status,
                 "mismatch_severity": latest_verification.mismatch_severity,
                 "summary": latest_verification.summary,
                 "key_findings": latest_verification.key_findings,
-            }, indent=2)
+            }
+
+        # Recompute deterministic local checks for the policy stage and pass
+        # their field-level results to the policy agent. These checks validate
+        # formats and dates only; they do not authenticate a certificate.
+        internal_registry = InternalRegistryService.match_vendor(case_id)
+        local_checks = ExternalVerificationService.verify_identifiers(
+            case_id, internal_registry_match=internal_registry
+        )
+        verification_report = json.dumps({
+            "verification_summary": verification_summary,
+            "internal_registry_match": internal_registry,
+            "local_identifier_and_certificate_checks": local_checks,
+            "verification_limitations": (
+                "No external registry or certificate authenticity check was performed. "
+                "A locally valid ISO number/date is not proof that the certificate is genuine."
+            ),
+        }, indent=2)
 
         return {
             "completeness_report": json.dumps(completeness, indent=2),
