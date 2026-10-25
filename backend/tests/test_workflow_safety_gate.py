@@ -59,6 +59,91 @@ class WorkflowSafetyGateTests(unittest.TestCase):
         self.assertTrue(gate_result["allowed"])
         evaluate.assert_called_once_with(42)
 
+    @patch("app.orchestrators.workflow_orchestrator.SafetyGate.evaluate")
+    @patch("app.orchestrators.workflow_orchestrator.InternalRegistryService.match_vendor")
+    def test_external_only_manual_review_can_use_strong_internal_checks(
+        self, match_vendor, evaluate
+    ):
+        match_vendor.return_value = {
+            "match_status": "matched",
+            "matched_vendor_number": "V-42",
+            "field_comparisons": [{
+                "vendor_number": "V-42",
+                "field_results": [{
+                    "field_name": "company_registered_number",
+                    "match": "exact",
+                }],
+            }],
+        }
+        evaluate.return_value = {"allowed": True}
+        verification = SimpleNamespace(
+            run_status="completed",
+            legitimacy_status="verified_with_minor_gaps",
+            mismatch_severity="minor",
+            confidence_score=0.99,
+        )
+        policy = SimpleNamespace(
+            risk_band="low",
+            blocking_issue_count=0,
+            recoverable_issue_count=0,
+            policy_confidence_score=0.91,
+        )
+
+        result = WorkflowOrchestrator._resolve_external_only_manual_review(
+            42,
+            "manual_review_required",
+            "Tax verification is incomplete because no external check was done.",
+            verification,
+            policy,
+        )
+
+        self.assertEqual(result[0], "complete_verified")
+        self.assertEqual(result[2], "Proceed with vendor onboarding")
+        self.assertEqual(result[3], 0.91)
+        self.assertIn("does not block approval", result[1])
+        evaluate.assert_called_once_with(42)
+
+    @patch("app.orchestrators.workflow_orchestrator.SafetyGate.evaluate")
+    @patch("app.orchestrators.workflow_orchestrator.InternalRegistryService.match_vendor")
+    def test_external_only_override_requires_safety_gate_to_pass(
+        self, match_vendor, evaluate
+    ):
+        match_vendor.return_value = {
+            "match_status": "matched",
+            "matched_vendor_number": "V-42",
+            "field_comparisons": [{
+                "vendor_number": "V-42",
+                "field_results": [{
+                    "field_name": "company_registered_number",
+                    "match": "exact",
+                }],
+            }],
+        }
+        evaluate.return_value = {"allowed": False}
+        verification = SimpleNamespace(
+            run_status="completed",
+            legitimacy_status="verified",
+            mismatch_severity="minor",
+            confidence_score=0.99,
+        )
+        policy = SimpleNamespace(
+            risk_band="low",
+            blocking_issue_count=0,
+            recoverable_issue_count=0,
+            policy_confidence_score=0.91,
+        )
+
+        result = WorkflowOrchestrator._resolve_external_only_manual_review(
+            42,
+            "manual_review_required",
+            "ISO certificate was not externally authenticated.",
+            verification,
+            policy,
+        )
+
+        self.assertIsNone(result)
+        evaluate.assert_called_once_with(42)
+
 
     @patch("app.orchestrators.workflow_orchestrator.SafetyGate.evaluate")
     def test_low_confidence_approval_is_forced_to_manual_review(self, evaluate):

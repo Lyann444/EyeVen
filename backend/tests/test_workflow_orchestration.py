@@ -577,7 +577,7 @@ class WorkflowOrchestrationTests(unittest.TestCase):
         self.assertEqual(result["blocking_issue_count"], 0)
         self.assertEqual(result["risk_flags"], [])
         self.assertEqual(result["blocking_issues"], [])
-        self.assertIn("No in-scope policy issues remain", result["policy_summary"])
+        self.assertIn("No blocking or recoverable in-scope issues remain", result["policy_summary"])
 
     def test_policy_normalization_ignores_declaration_and_outsourcing_findings(self):
         result = WorkflowOrchestrator._normalize_policy_result(
@@ -649,6 +649,152 @@ class WorkflowOrchestrationTests(unittest.TestCase):
 
         self.assertEqual(result["risk_band"], "high")
         self.assertEqual(result["blocking_issue_count"], 1)
+
+    def test_policy_normalization_ignores_external_gaps_after_internal_match(self):
+        fields = [
+            SimpleNamespace(
+                field_name="tax_sst_gst_number",
+                value_text="B16-1808-32001114",
+                normalized_value_text="B16-1808-32001114",
+                status="matched_with_evidence",
+            ),
+            SimpleNamespace(
+                field_name="iso_certification_available",
+                value_text="Yes",
+                normalized_value_text="Yes",
+                status="matched_with_evidence",
+            ),
+            SimpleNamespace(
+                field_name="iso_certification_number",
+                value_text="MY-ISO9001-2024-8831",
+                normalized_value_text="MY-ISO9001-2024-8831",
+                status="filled_from_supporting_docs",
+            ),
+            SimpleNamespace(
+                field_name="iso_certification_expiry_date",
+                value_text="09 January 2099",
+                normalized_value_text="09 January 2099",
+                status="filled_from_supporting_docs",
+            ),
+        ]
+        registry_match = {
+            "match_status": "matched",
+            "matched_vendor_number": "V-10004",
+            "field_comparisons": [{
+                "vendor_number": "V-10004",
+                "field_results": [{
+                    "field_name": "tax_sst_gst_number",
+                    "match": "exact",
+                }],
+            }],
+        }
+
+        result = WorkflowOrchestrator._normalize_policy_result(
+            {
+                "risk_band": "medium",
+                "risk_flags": [{
+                    "flag_type": "certification_unverifiable",
+                    "description": "ISO authenticity was not externally authenticated.",
+                    "field_name": "iso_certification_number",
+                    "severity": "recoverable",
+                }],
+                "blocking_issues": [],
+                "recoverable_issues": [
+                    "Tax identifier was not externally verified.",
+                    "ISO certificate authenticity could not be externally confirmed.",
+                ],
+                "blocking_issue_count": 0,
+                "recoverable_issue_count": 2,
+            },
+            fields,
+            None,
+            registry_match,
+        )
+
+        self.assertEqual(result["risk_band"], "low")
+        self.assertEqual(result["blocking_issue_count"], 0)
+        self.assertEqual(result["recoverable_issue_count"], 0)
+        self.assertEqual(result["blocking_issues"], [])
+        self.assertEqual(result["recoverable_issues"], [])
+        self.assertEqual(result["risk_flags"][0]["severity"], "warning")
+        self.assertIn("no external verification is claimed", result["policy_summary"])
+
+    def test_policy_normalization_preserves_actual_iso_expiry_issue(self):
+        fields = [
+            SimpleNamespace(
+                field_name="iso_certification_available",
+                value_text="Yes",
+                normalized_value_text="Yes",
+                status="matched_with_evidence",
+            ),
+            SimpleNamespace(
+                field_name="iso_certification_number",
+                value_text="ISO-12345",
+                normalized_value_text="ISO-12345",
+                status="filled_from_supporting_docs",
+            ),
+            SimpleNamespace(
+                field_name="iso_certification_expiry_date",
+                value_text="01 January 2000",
+                normalized_value_text="01 January 2000",
+                status="matched_with_evidence",
+            ),
+        ]
+
+        result = WorkflowOrchestrator._normalize_policy_result(
+            {
+                "risk_band": "high",
+                "risk_flags": [{
+                    "flag_type": "certification_expired",
+                    "description": "ISO certificate expired on 01 January 2000.",
+                    "field_name": "iso_certification_expiry_date",
+                    "severity": "blocking",
+                }],
+                "blocking_issues": ["ISO certificate expired."],
+                "recoverable_issues": [],
+                "blocking_issue_count": 1,
+                "recoverable_issue_count": 0,
+            },
+            fields,
+            None,
+        )
+
+        self.assertEqual(result["risk_band"], "high")
+        self.assertEqual(result["blocking_issue_count"], 1)
+        self.assertEqual(result["blocking_issues"], ["ISO certificate expired."])
+
+    def test_policy_normalization_keeps_tax_verification_gap_without_exact_registry_match(self):
+        fields = [
+            SimpleNamespace(
+                field_name="tax_sst_gst_number",
+                value_text="TAX-12345",
+                normalized_value_text="TAX-12345",
+                status="matched_with_evidence",
+            )
+        ]
+        result = WorkflowOrchestrator._normalize_policy_result(
+            {
+                "risk_band": "medium",
+                "risk_flags": [{
+                    "flag_type": "tax_identifier_gap",
+                    "description": "Tax identifier was not externally verified.",
+                    "field_name": "tax_sst_gst_number",
+                    "severity": "recoverable",
+                }],
+                "blocking_issues": [],
+                "recoverable_issues": [
+                    "Tax identifier was not externally verified."
+                ],
+                "blocking_issue_count": 0,
+                "recoverable_issue_count": 1,
+            },
+            fields,
+            None,
+        )
+
+        self.assertEqual(result["risk_band"], "medium")
+        self.assertEqual(result["recoverable_issue_count"], 1)
+        self.assertEqual(len(result["recoverable_issues"]), 1)
 
     def test_policy_normalization_clears_revenue_follow_up_after_vendor_response(self):
         revenue = SimpleNamespace(

@@ -96,7 +96,11 @@ verification status.
 
 An internal demo-registry lookup is available only for the supported company
 registration identifiers. It is not an external government or commercial
-registry check.
+registry check. Exact field-level registry matches, including tax identifiers,
+are reported as internally corroborated. EyeVen does not externally validate
+tax identifiers or authenticate ISO certificates; that unavailable capability
+does not by itself create a policy gap or block approval. Missing or conflicting
+values, invalid local formats, and expired ISO dates remain actionable findings.
 
 ### Policy evaluation
 

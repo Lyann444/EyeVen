@@ -290,6 +290,7 @@ class ContextAssembler:
             "completeness_report": json.dumps(completeness, indent=2),
             "verification_report": verification_report,
             "vendor_profile": vendor_profile,
+            "internal_registry_match": internal_registry,
         }
 
     @staticmethod

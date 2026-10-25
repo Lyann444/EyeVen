@@ -22,6 +22,7 @@ from app.services.form_service import FormService
 from app.services.glm_service import GlmService, GlmServiceError
 from app.services.context_assembler import ContextAssembler
 from app.services.safety_gate import FOLLOW_UP_FIELDS, SafetyGate
+from app.services.internal_registry_service import InternalRegistryService
 from app.services.action_executor import ActionExecutor, ActionExecutorError
 from app.services.next_action_planner import (
     NextActionPlanner,
@@ -1134,7 +1135,10 @@ class WorkflowOrchestrator:
             vendor_case_id=case_id
         ).all()
         glm_result = WorkflowOrchestrator._normalize_policy_result(
-            glm_result, fields, case.registration_type
+            glm_result,
+            fields,
+            case.registration_type,
+            context.get("internal_registry_match"),
         )
 
         latest_verification = VerificationRun.query.filter_by(
@@ -1167,7 +1171,9 @@ class WorkflowOrchestrator:
         }
 
     @staticmethod
-    def _normalize_policy_result(result, fields, registration_type):
+    def _normalize_policy_result(
+        result, fields, registration_type, internal_registry_match=None
+    ):
         field_values = {
             field.field_name: (
                 getattr(field, "normalized_value_text", None)
@@ -1176,6 +1182,10 @@ class WorkflowOrchestrator:
             ).strip().casefold()
             for field in fields
         }
+        fields_by_name = {field.field_name: field for field in fields}
+        registry_corroborated_fields = SafetyGate._registry_corroborated_fields(
+            internal_registry_match
+        )
         optional_fields = set(CANONICAL_FIELD_NAMES) - FOLLOW_UP_FIELDS
         if field_values.get("iso_certification_available", "") not in SafetyGate.AFFIRMATIVE_VALUES:
             optional_fields.update({
@@ -1247,54 +1257,127 @@ class WorkflowOrchestrator:
         # Lack of an external certificate-authenticity integration is a
         # verification limitation, not evidence that an ISO certificate is
         # invalid. Do not let that limitation alone become a blocking issue.
-        def is_external_authenticity_limitation(item):
+        iso_claimed = (
+            field_values.get("iso_certification_available", "")
+            in SafetyGate.AFFIRMATIVE_VALUES
+        )
+        iso_details_present = all(
+            field_values.get(field_name, "")
+            for field_name in (
+                "iso_certification_number",
+                "iso_certification_expiry_date",
+            )
+        )
+        iso_fields_unconflicted = all(
+            fields_by_name.get(field_name) is not None
+            and fields_by_name[field_name].status not in SafetyGate.REVIEW_FIELD_STATUSES
+            for field_name in (
+                "iso_certification_number",
+                "iso_certification_expiry_date",
+            )
+        )
+        external_limitation_terms = (
+            "not externally verified",
+            "was not externally verified",
+            "could not be externally verified",
+            "not externally authenticated",
+            "authenticity was not confirmed",
+            "authenticity could not be confirmed",
+            "authenticity could not be externally confirmed",
+            "external verification unavailable",
+            "no external verification",
+            "missing external verification",
+            "external verification is missing",
+            "not independently verified",
+            "not independently authenticated",
+            "could not fully verify",
+            "verification is incomplete",
+            "verification incomplete",
+            "partially verified",
+            "partially_verified",
+        )
+        actual_issue_terms = (
+            "expired",
+            "field is missing",
+            "identifier is missing",
+            "certificate number is missing",
+            "expiry date is missing",
+            "not provided",
+            "invalid format",
+            "malformed",
+            "field is absent",
+            "conflicting",
+            "mismatch",
+            "does not match",
+        )
+
+        def is_external_verification_limitation(item):
             if isinstance(item, dict):
                 field_name = str(item.get("field_name") or "").casefold()
                 flag_type = str(item.get("flag_type") or "").casefold()
                 description = str(item.get("description") or "").casefold()
-                text = " ".join((field_name, flag_type, description))
+                text = " ".join(
+                    (field_name, flag_type, description)
+                ).replace("_", " ")
             else:
-                text = str(item).casefold()
-            text = text.replace("_", " ")
-            mentions_iso = any(term in text for term in (
-                "iso", "certification", "certificate",
-            ))
-            mentions_external_limit = any(term in text for term in (
-                "not externally verified",
-                "not externally authenticated",
-                "authenticity was not confirmed",
-                "authenticity could not be confirmed",
-                "external verification unavailable",
-                "no external verification",
-                "not independently verified",
-                "not independently authenticated",
-            ))
-            describes_actual_failure = any(term in text for term in (
-                "expired", "missing", "not provided", "invalid format",
-                "malformed", "field is absent",
-            ))
-            return mentions_iso and mentions_external_limit and not describes_actual_failure
+                text = str(item).casefold().replace("_", " ")
+                field_name = ""
+                flag_type = ""
+
+            if not any(term in text for term in external_limitation_terms):
+                return False
+            if any(term in text for term in actual_issue_terms):
+                return False
+
+            tax_finding = (
+                "tax_sst_gst_number" in field_name
+                or "tax identifier" in text
+                or "tax/sst/gst" in text
+                or "sst/gst" in text
+            )
+            iso_finding = (
+                field_name.startswith("iso_certification_")
+                or "iso" in text
+                or "certification" in text
+                or "certificate" in text
+            )
+            tax_is_corroborated = (
+                not tax_finding
+                or "tax_sst_gst_number" in registry_corroborated_fields
+            )
+            iso_is_complete = (
+                not iso_finding
+                or (
+                    iso_claimed
+                    and iso_details_present
+                    and iso_fields_unconflicted
+                )
+            )
+            return (tax_finding or iso_finding) and tax_is_corroborated and iso_is_complete
 
         retained_flags = []
-        downgraded_authenticity_limitations = False
+        removed_external_limitations = False
         for flag in normalized.get("risk_flags", []):
-            if is_external_authenticity_limitation(flag) and isinstance(flag, dict):
+            if is_external_verification_limitation(flag) and isinstance(flag, dict):
                 flag = dict(flag)
                 flag["severity"] = "warning"
                 flag["description"] = (
                     str(flag.get("description") or "").strip()
-                    + " External authenticity was not checked by this system; "
-                    "this limitation alone is not evidence of certificate invalidity."
+                    + " External authentication is not available in this system; "
+                    "the exact tax registry match or supplied ISO details are retained "
+                    "without claiming external verification."
                 ).strip()
-                downgraded_authenticity_limitations = True
+                removed_external_limitations = True
             retained_flags.append(flag)
         normalized["risk_flags"] = retained_flags
 
         for key in ("blocking_issues", "recoverable_issues"):
             normalized[key] = [
                 item for item in normalized.get(key, [])
-                if not is_external_authenticity_limitation(item)
+                if not is_external_verification_limitation(item)
             ]
+            if len(normalized[key]) != len(result.get(key, [])):
+                removed_external_limitations = True
 
         risk_flags = normalized.get("risk_flags", [])
         blocking_flag_count = sum(
@@ -1322,23 +1405,16 @@ class WorkflowOrchestrator:
             )
             and not normalized.get("blocking_issues")
             and not normalized.get("recoverable_issues")
-            and (removed_optional_issue or downgraded_authenticity_limitations)
+            and (removed_optional_issue or removed_external_limitations)
         ):
-            normalized["risk_band"] = "medium" if downgraded_authenticity_limitations else "low"
+            normalized["risk_band"] = "low"
             normalized["policy_summary"] = (
-                "No blocking or recoverable in-scope issues remain. ISO certificate "
-                "authenticity was not externally checked; this is recorded as a "
-                "verification limitation, not as evidence that the certificate is invalid."
-                if downgraded_authenticity_limitations
-                else "No in-scope policy issues remain after excluding findings "
-                "outside the required vendor field scope."
+                "No blocking or recoverable in-scope issues remain. External "
+                "registry/certificate authentication is unavailable and is not "
+                "treated as a deficiency; no external verification is claimed."
             )
             normalized["recommended_next_step"] = (
-                "Continue routing with the external-authenticity limitation disclosed; "
-                "use manual review only if applicable onboarding policy requires independent "
-                "certificate verification."
-                if downgraded_authenticity_limitations
-                else "Proceed to routing based on the in-scope findings."
+                "Proceed to routing based on the in-scope evidence."
             )
         return normalized
 
@@ -1410,6 +1486,82 @@ class WorkflowOrchestrator:
         return decision_code, decision_reasoning, recommended_action, gate_result
 
     @staticmethod
+    def _resolve_external_only_manual_review(
+        case_id, decision_code, decision_reasoning, verification, policy
+    ):
+        """Use strong persisted checks when routing hesitates only over external checks."""
+        if decision_code != "manual_review_required":
+            return None
+
+        reason = str(decision_reasoning or "").casefold()
+        if not any(
+            term in reason
+            for term in (
+                "external",
+                "not independently verified",
+                "not independently authenticated",
+                "partially verified",
+                "partial verification",
+                "not externally authenticated",
+            )
+        ):
+            return None
+
+        if (
+            verification is None
+            or verification.run_status != "completed"
+            or verification.legitimacy_status
+            not in {"verified", "verified_with_minor_gaps"}
+            or verification.mismatch_severity != "minor"
+            or policy is None
+            or policy.risk_band != "low"
+            or policy.blocking_issue_count != 0
+            or policy.recoverable_issue_count != 0
+        ):
+            return None
+
+        stage_confidences = (
+            verification.confidence_score,
+            policy.policy_confidence_score,
+        )
+        try:
+            stage_confidences = tuple(float(value) for value in stage_confidences)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if any(
+            not math.isfinite(value) or not 0.85 <= value <= 1.0
+            for value in stage_confidences
+        ):
+            return None
+
+        registry_match = InternalRegistryService.match_vendor(case_id)
+        corroborated_fields = SafetyGate._registry_corroborated_fields(
+            registry_match
+        )
+        if not corroborated_fields.intersection({
+            "company_registered_number",
+            "ssm_roc_rob_number",
+        }):
+            return None
+
+        gate_result = SafetyGate.evaluate(case_id)
+        if not gate_result["allowed"]:
+            return None
+
+        effective_confidence = min(stage_confidences)
+        return (
+            "complete_verified",
+            (
+                str(decision_reasoning or "").strip()
+                + " | Deterministic verification and policy checks passed, and "
+                "the registration identifier exactly matches the internal registry. "
+                "Unavailable external tax or ISO authentication does not block approval."
+            ).strip(" |"),
+            "Proceed with vendor onboarding",
+            effective_confidence,
+        )
+
+    @staticmethod
     def _normalize_decision_evidence(value):
         """Keep only well-formed source/finding pairs from routing model output."""
         if not isinstance(value, list):
@@ -1464,6 +1616,34 @@ class WorkflowOrchestrator:
             vendor_case_id=case_id
         ).order_by(PolicyEvaluationRun.created_at.desc()).first()
 
+        external_only_resolution = (
+            WorkflowOrchestrator._resolve_external_only_manual_review(
+                case_id,
+                decision_code,
+                decision_reasoning,
+                latest_verification,
+                latest_policy,
+            )
+        )
+        if external_only_resolution:
+            (
+                decision_code,
+                decision_reasoning,
+                recommended_action,
+                routing_confidence,
+            ) = external_only_resolution
+            decision_evidence.append({
+                "source": "deterministic_internal_registry_and_safety_checks",
+                "finding": (
+                    "Exact internal registration match and passing verification, "
+                    "policy, and safety checks; unavailable external authentication "
+                    "was not treated as a blocker."
+                ),
+            })
+            glm_result["confidence"] = routing_confidence
+        else:
+            routing_confidence = glm_result.get("confidence")
+
         # The LLM may recommend approval, but deterministic Python rules
         # can veto it before the decision is persisted.
         (
@@ -1476,7 +1656,7 @@ class WorkflowOrchestrator:
             decision_code,
             decision_reasoning,
             recommended_action,
-            glm_result.get("confidence"),
+            routing_confidence,
         )
         (
             decision_code,
@@ -1497,7 +1677,7 @@ class WorkflowOrchestrator:
             decision_code,
             decision_reasoning,
             recommended_action,
-            glm_result.get("confidence"),
+            routing_confidence,
         )
 
         decision = RoutingDecision(

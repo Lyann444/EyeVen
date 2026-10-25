@@ -6,6 +6,43 @@ from app.services.external_verification_service import ExternalVerificationServi
 
 
 class ExternalVerificationServiceTests(unittest.TestCase):
+    def test_exact_internal_tax_match_is_reported_as_internal_not_external(self):
+        fields = [
+            SimpleNamespace(field_name="ssm_roc_rob_number", value_text="201901045678"),
+            SimpleNamespace(
+                field_name="tax_sst_gst_number",
+                value_text="B16-1808-32001114",
+            ),
+            SimpleNamespace(
+                field_name="iso_certification_available", value_text="no"
+            ),
+        ]
+        registry_match = {
+            "match_status": "matched",
+            "matched_vendor_number": "V-10004",
+            "field_comparisons": [{
+                "vendor_number": "V-10004",
+                "field_results": [{
+                    "field_name": "tax_sst_gst_number",
+                    "match": "exact",
+                }],
+            }],
+        }
+        with patch(
+            "app.services.external_verification_service.EyeVenFormFieldValue"
+        ) as model:
+            model.query.filter_by.return_value.all.return_value = fields
+            result = ExternalVerificationService.verify_identifiers(
+                12, internal_registry_match=registry_match
+            )
+
+        self.assertEqual(result["overall_status"], "internally_corroborated")
+        self.assertEqual(
+            result["checks"]["tax_verification"]["status"], "internally_matched"
+        )
+        self.assertIn("tax_sst_gst_number", result["internally_corroborated_fields"])
+        self.assertFalse(result["external_registry_contacted"])
+
     def test_ssm_reports_common_syntax_without_claiming_registry_verification(self):
         result = ExternalVerificationService._verify_ssm(
             "201901045678 (1355008-X)"

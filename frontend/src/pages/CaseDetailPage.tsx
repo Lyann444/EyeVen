@@ -622,9 +622,6 @@ const CaseDetailPage: React.FC = () => {
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>EyeVen Form Alignment</Typography>
-              <Alert severity="info" sx={{ mb: 2 }}>
-                EyeVen classifies unresolved values from document review and OCR confidence. When reviewed documents are readable but an in-scope value is not found, the workflow creates a vendor follow-up email draft; you can also enter or correct the value using Edit. When OCR confidence is low or the evidence is uncertain, EyeVen does not treat the value as missing from the vendor—the PIC should enter or correct it using Edit. After a vendor reply, enter the received value here and save to reprocess verification, policy, and routing.
-              </Alert>
               <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
                 <Chip label={`${populated} Populated`} color="success" size="small" />
                 <Chip label={`${missing} Missing`} color="default" size="small" />

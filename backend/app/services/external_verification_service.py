@@ -3,6 +3,7 @@ import re
 from datetime import datetime
 
 from app.models import EyeVenFormFieldValue
+from app.services.safety_gate import SafetyGate
 
 logger = logging.getLogger(__name__)
 
@@ -17,22 +18,39 @@ class ExternalVerificationService:
             isinstance(internal_registry_match, dict)
             and internal_registry_match.get("match_status") == "matched"
         )
+        registry_corroborated_fields = (
+            SafetyGate._registry_corroborated_fields(internal_registry_match)
+        )
+        ssm_field = "ssm_roc_rob_number"
+        tax_field = "tax_sst_gst_number"
         results = {
             "ssm_verification": (
                 {
-                    "status": "skipped",
+                    "status": "internally_matched",
                     "detail": (
-                        "SSM format check skipped because the internal registry "
-                        "matched; no external registry was contacted"
+                        "SSM/ROC/ROB identifier exactly matches the selected "
+                        "internal registry record; no external registry was contacted"
                     ),
+                    "verified_value": field_map.get(ssm_field, ""),
                 }
-                if registry_matched
+                if ssm_field in registry_corroborated_fields
                 else ExternalVerificationService._verify_ssm(
-                    field_map.get("ssm_roc_rob_number", "")
+                    field_map.get(ssm_field, "")
                 )
             ),
-            "tax_verification": ExternalVerificationService._verify_tax(
-                field_map.get("tax_sst_gst_number", "")
+            "tax_verification": (
+                {
+                    "status": "internally_matched",
+                    "detail": (
+                        "Tax/SST/GST identifier exactly matches the selected "
+                        "internal registry record; no external tax registry was contacted"
+                    ),
+                    "verified_value": field_map.get(tax_field, ""),
+                }
+                if tax_field in registry_corroborated_fields
+                else ExternalVerificationService._verify_tax(
+                    field_map.get(tax_field, "")
+                )
             ),
             "iso_verification": ExternalVerificationService._verify_iso(
                 field_map.get("iso_certification_available", ""),
@@ -44,14 +62,11 @@ class ExternalVerificationService:
         ssm_status = results["ssm_verification"]["status"]
         tax_status = results["tax_verification"]["status"]
 
-        if registry_matched:
-            overall = (
-                "partially_verified"
-                if tax_status in ("verified", "partially_verified")
-                else "unverifiable"
-                if tax_status == "failed"
-                else "partially_verified"
-            )
+        if (
+            ssm_status == "internally_matched"
+            or tax_status == "internally_matched"
+        ):
+            overall = "internally_corroborated"
         elif ssm_status == "verified" and tax_status == "verified":
             overall = "verified"
         elif ssm_status in ("verified", "partially_verified") and tax_status in ("verified", "partially_verified"):
@@ -63,7 +78,19 @@ class ExternalVerificationService:
 
         return {
             "overall_status": overall,
-            "verification_source": "local_format_checks_only",
+            "verification_source": (
+                "internal_registry_and_local_format_checks"
+                if registry_corroborated_fields
+                else "local_format_checks_only"
+            ),
+            "internal_registry_match_status": (
+                "matched" if registry_matched else
+                internal_registry_match.get("match_status")
+                if isinstance(internal_registry_match, dict) else None
+            ),
+            "internally_corroborated_fields": sorted(
+                registry_corroborated_fields
+            ),
             "external_registry_contacted": False,
             "checks": results,
         }

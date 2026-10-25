@@ -20,6 +20,8 @@ VERIFICATION SOURCE RULES:
 - A skipped SSM format check due to an internal registry match is not a failure.
 - Use the internal registry field comparison results: an exact SSM or tax identifier match is internally corroborated and must not be described as a mismatch. This is internal corroboration, not external verification.
 - When tax_sst_gst_number has an exact internal registry match, ignore any external/local tax-verification limitation for that value. Do not lower confidence, report a gap, or recommend follow-up solely because the external tax check is partial, unavailable, or not performed.
+- EyeVen has no external tax registry or certificate-authenticity integration. A missing external result must not lower legitimacy, increase mismatch severity, lower confidence, or produce a follow-up/manual-review recommendation when the submitted details are complete and internally consistent.
+- If the internal registry corroborates the submitted registration identity and there are no material in-scope contradictions, classify the vendor as verified or verified_with_minor_gaps with minor severity even though tax or ISO authenticity was not externally checked. State the limitation without presenting it as a deficiency.
 - A local tax-format result of "partially_verified" means the format is plausible but no external check was performed; it is not evidence that the tax number is invalid or mismatched. EyeVen does not contact an external tax registry.
 - For tax/SST/GST comparisons, ignore case, spaces, hyphens, and punctuation. Matching alphanumeric identifier content is formatting-only, not a discrepancy.
 - For ISO certification details, compare certificate numbers after trimming whitespace and compare expiry dates as calendar dates; equivalent formats such as "09 January 2027" and "2027-01-09" are the same date. Do not report a discrepancy when the certificate number and date agree across the supplied form and certificate.
@@ -81,7 +83,7 @@ Return a JSON object:
 }}
 
 CONFIDENCE RULES:
-- If all critical fields are consistent and verifiable: confidence >= 0.85
+- If all critical fields are consistent and internally corroborated where applicable: confidence >= 0.85, even when external verification is unavailable
 - If minor mismatches exist but case is recoverable: confidence 0.6-0.8
 - If moderate mismatches exist: confidence 0.3-0.6
 - If critical mismatches or unverifiable identity: confidence <= 0.3

@@ -64,6 +64,12 @@ class SafetyGate:
         "bank_account_name",
         "bank_account_number",
     }
+    REGISTRY_CORROBORATABLE_FIELDS = {
+        "company_registered_name",
+        "company_registered_number",
+        "ssm_roc_rob_number",
+        "tax_sst_gst_number",
+    }
     BANK_FIELDS = {
         "bank_name",
         "bank_account_name",
@@ -353,6 +359,7 @@ class SafetyGate:
                 item.get("field_name")
                 for item in comparison.get("field_results", [])
                 if item.get("match") == "exact"
-                and item.get("field_name") in SafetyGate.EVIDENCE_REQUIRED_FIELDS
+                and item.get("field_name")
+                in SafetyGate.REGISTRY_CORROBORATABLE_FIELDS
             }
         return set()
