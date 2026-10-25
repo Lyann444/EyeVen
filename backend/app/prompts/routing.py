@@ -17,12 +17,15 @@ POSSIBLE ROUTING OUTCOMES:
 ROUTING RULES — YOU MUST FOLLOW THESE:
 - Only assess and route based on these fields: company_registered_name, company_registered_number, company_website, main_office_phone_number, bank_account_name, bank_account_number, bank_name, latest_annual_revenue_range, contact_email, contact_mobile_number, contact_person_name, iso_certification_available, iso_certification_expiry_date, iso_certification_number, ssm_roc_rob_number, tax_sst_gst_number. ISO number and expiry apply only when certification is claimed.
 - Ignore all other form fields, their missing values, formatting differences, and mismatches. They must not lower confidence, increase risk, block completion, or cause follow-up.
+- A minor mismatch severity alone is not a reason for manual review, follow-up, or reduced confidence. Minor severity means no material in-scope contradiction remains.
+- When legitimacy_status is verified or verified_with_minor_gaps, mismatch_severity is minor, policy risk is low with zero blocking and recoverable issues, and the structured field evidence report has zero unresolved fields, choose complete_verified and confidence >= 0.8.
+- External or local verification being partial, unavailable, or not performed is not an unresolved issue by itself. If an identifier is corroborated by an exact internal registry match, treat it as verified for routing and do not lower confidence because an external check is incomplete.
 - Request follow-up only for unresolved fields explicitly listed as follow-up eligible in the structured field evidence report. business_type_other and other optional fields must not trigger follow-up.
 - Never request an authorized signature or company chop; they are optional. Do not request a field listed under pic_supplied_fields or vendor_response_received_fields again. A low-confidence PIC-entered value may still require manual review, but it is not a reason to request the same value again.
 - No complete_verified if critical fields are missing
 - No complete_verified if critical contradictions remain unresolved
 - No complete_verified if legitimacy is unverifiable
-- Minor mismatches must NOT produce rejection
+- Minor mismatches must NOT produce rejection or manual review by themselves
 - In-scope moderate mismatches must NOT auto-complete the case and must be routed to manual_review_required, not rejected
 - Reject only when verification reports critical mismatch severity or critical contradictions in-scope
 - In-scope critical mismatches or materially unverifiable identity must produce rejection or manual review
@@ -49,11 +52,13 @@ CONFIDENCE RULES:
 - If evidence is mixed but direction is clear: confidence 0.5-0.8
 - If routing is uncertain: confidence <= 0.5 and use manual_review_required
 - Do not lower routing confidence because fields outside the in-scope list were skipped.
+- The verified, low-risk, zero-unresolved-fields condition above is clearly supported evidence; use confidence >= 0.8 rather than manual review.
 
 FORBIDDEN BEHAVIOR:
 - Do not return complete_verified when blocking issues exist
 - Do not return complete_verified when risk is high or critical
 - Do not return rejected for minor mismatches
+- Do not recommend manual review solely because minor mismatches or partial external-verification coverage are mentioned in a summary
 - Do not return complete_verified for moderate mismatches
 - Every routing decision must be justified with evidence
 

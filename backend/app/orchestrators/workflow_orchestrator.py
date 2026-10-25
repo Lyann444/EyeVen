@@ -432,6 +432,12 @@ class WorkflowOrchestrator:
             return None
         if any(
             candidate.get("availability") != "not_found_in_reviewed_documents"
+            or candidate.get("status") in {
+                "conflicting",
+                "unverifiable",
+                "low_confidence",
+                "mismatched_with_evidence",
+            }
             for candidate in candidates
         ):
             return None

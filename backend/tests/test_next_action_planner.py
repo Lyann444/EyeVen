@@ -36,6 +36,38 @@ class NextActionPlannerTests(unittest.TestCase):
         self.case_patch.start()
         self.addCleanup(self.case_patch.stop)
 
+    def test_low_confidence_field_is_not_classified_as_absent(self):
+        field = SimpleNamespace(
+            status="low_confidence",
+            source_file_id=None,
+            source_excerpt=None,
+        )
+
+        availability = NextActionPlanner._field_availability(
+            field,
+            {1: SimpleNamespace(id=1)},
+            documents_added_after_structuring=False,
+            documents_have_been_reviewed=True,
+        )
+
+        self.assertEqual(availability, "ambiguous_or_conflicting")
+
+    def test_readable_reviewed_missing_field_is_classified_as_absent(self):
+        field = SimpleNamespace(
+            status="missing",
+            source_file_id=None,
+            source_excerpt=None,
+        )
+
+        availability = NextActionPlanner._field_availability(
+            field,
+            {1: SimpleNamespace(id=1)},
+            documents_added_after_structuring=False,
+            documents_have_been_reviewed=True,
+        )
+
+        self.assertEqual(availability, "not_found_in_reviewed_documents")
+
     def test_missing_information_selects_follow_up_action(self):
         snapshot = {
             "fields": [{

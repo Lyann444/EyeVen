@@ -279,22 +279,49 @@ class CaseService:
                 not isinstance(source_file_id, int) or isinstance(source_file_id, bool)
             ):
                 raise ValueError(f"source_file_id must be an integer: {field_name}")
-            if source_file_id is not None and not UploadedFile.query.filter_by(
-                id=source_file_id, vendor_case_id=case_id
-            ).first():
-                raise ValueError(f"Source document does not belong to this case: {field_name}")
+            source_file = None
+            if source_file_id is not None:
+                source_file = UploadedFile.query.filter_by(
+                    id=source_file_id, vendor_case_id=case_id
+                ).first()
+                if not source_file:
+                    raise ValueError(
+                        f"Source document does not belong to this case: {field_name}"
+                    )
             validated.append((
                 field_name,
                 value,
                 source_file_id,
                 confirmed,
                 vendor_response,
+                source_file.source_category if source_file else None,
             ))
             seen.add(field_name)
 
-        for field_name, value, source_file_id, confirmed, vendor_response in validated:
+        supporting_document_fields = []
+        for (
+            field_name,
+            value,
+            source_file_id,
+            confirmed,
+            vendor_response,
+            source_category,
+        ) in validated:
             field = fields_by_name[field_name]
             original = field.value_text
+            has_supporting_document = (
+                source_file_id is not None
+                and source_category in {"supporting_document", "corrected_upload"}
+            )
+            can_use_supporting_document_confidence = (
+                has_supporting_document
+                and not vendor_response
+                and field.status not in {
+                    "conflicting",
+                    "mismatched_with_evidence",
+                    "unverifiable",
+                }
+            )
             note = (
                 f"PIC manual correction; not independently verified. "
                 f"Previous extracted value: {original!r}."
@@ -307,15 +334,36 @@ class CaseService:
                 note += " PIC indicated the value was checked against the source document."
             if vendor_response:
                 note += " Vendor response received and transcribed by PIC."
+            if can_use_supporting_document_confidence:
+                note += (
+                    " Demo mode: high confidence assigned because a supporting "
+                    "document was selected for this value."
+                )
             existing_notes = (field.notes or "").strip()
             field.notes = f"{existing_notes}\n{note}" if existing_notes else note
             field.value_text = value or None
             field.normalized_value_text = value or None
-            field.value_source = "vendor_response" if vendor_response else "unknown"
-            field.status = "low_confidence" if value else "missing"
-            field.confidence_score = None
+            field.value_source = (
+                "vendor_response"
+                if vendor_response
+                else "supporting_document"
+                if can_use_supporting_document_confidence
+                else "unknown"
+            )
+            field.status = (
+                "filled_from_supporting_docs"
+                if value and can_use_supporting_document_confidence
+                else "low_confidence"
+                if value
+                else "missing"
+            )
+            field.confidence_score = (
+                0.9 if can_use_supporting_document_confidence else None
+            )
             field.source_file_id = source_file_id
             field.source_excerpt = None
+            if can_use_supporting_document_confidence:
+                supporting_document_fields.append(field_name)
 
         db.session.commit()
         result = ReprocessingOrchestrator.reprocess(
@@ -324,6 +372,7 @@ class CaseService:
         return {
             "case_id": case_id,
             "updated_fields": [item[0] for item in validated],
+            "supporting_document_fields": supporting_document_fields,
             "manual_values_are_independently_verified": False,
             "reprocessing": result,
         }

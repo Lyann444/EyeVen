@@ -48,16 +48,19 @@ class WorkflowOrchestrationTests(unittest.TestCase):
         plan = WorkflowOrchestrator._deterministic_recovery_plan(snapshot)
 
         self.assertEqual(plan["action"], "request_information")
+        self.assertIn("reviewing the submitted documents", plan["reason"])
 
     def test_deterministic_follow_up_rejects_unreviewed_or_ambiguous_evidence(self):
-        for availability, ambiguous_fields in [
-            ("documents_not_yet_reviewed", []),
-            ("not_found_in_reviewed_documents", ["bank_account_number"]),
+        for availability, ambiguous_fields, status in [
+            ("documents_not_yet_reviewed", [], "missing"),
+            ("not_found_in_reviewed_documents", ["bank_account_number"], "missing"),
+            ("not_found_in_reviewed_documents", [], "low_confidence"),
         ]:
             snapshot = {
                 "follow_up_candidates": [{
                     "field_name": "bank_account_number",
                     "availability": availability,
+                    "status": status,
                 }],
                 "case_evidence_assessment": {
                     "ambiguous_fields": ambiguous_fields,
@@ -786,6 +789,23 @@ class WorkflowOrchestrationTests(unittest.TestCase):
         )
         self.assertIn("INTERNAL REGISTRY RESULT:", rendered)
 
+    def test_routing_prompt_completes_verified_low_risk_minor_gaps(self):
+        from app.prompts.routing import ROUTING_PROMPT
+
+        prompt = ROUTING_PROMPT.lower()
+        self.assertIn(
+            "a minor mismatch severity alone is not a reason for manual review",
+            prompt,
+        )
+        self.assertIn(
+            "zero unresolved fields, choose complete_verified and confidence >= 0.8",
+            prompt,
+        )
+        self.assertIn(
+            "do not recommend manual review solely because minor mismatches",
+            prompt,
+        )
+
     def test_normalize_decision_evidence_discards_malformed_items(self):
         result = WorkflowOrchestrator._normalize_decision_evidence([
             {"source": "registry", "finding": "matched"},
@@ -856,6 +876,17 @@ class WorkflowOrchestrationTests(unittest.TestCase):
             {"fields": []},
             {"extraction": extraction},
         ))
+        self.assertIsNone(WorkflowOrchestrator._deterministic_recovery_plan({
+            "follow_up_candidates": [{
+                "field_name": "bank_account_number",
+                "status": "low_confidence",
+                "availability": "not_found_in_reviewed_documents",
+            }],
+            "case_evidence_assessment": {
+                "ambiguous_fields": [],
+                "documents_added_after_last_structuring": False,
+            },
+        }))
 
     def test_low_ocr_quality_holds_case_before_routing(self):
         self.case.current_state = "intake_received"

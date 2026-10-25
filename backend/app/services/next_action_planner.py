@@ -593,6 +593,11 @@ class NextActionPlanner:
             return "no_documents_submitted"
         if not documents_have_been_reviewed:
             return "documents_not_yet_reviewed"
-        if field.status in {"conflicting", "unverifiable", "mismatched_with_evidence"}:
+        if field.status in {
+            "conflicting",
+            "unverifiable",
+            "low_confidence",
+            "mismatched_with_evidence",
+        }:
             return "ambiguous_or_conflicting"
         return "not_found_in_reviewed_documents"

@@ -267,10 +267,11 @@ const CaseDetailPage: React.FC = () => {
       setEditField(null);
       const reprocessStatus = response.data?.reprocessing?.status;
       const processed = reprocessStatus === 'completed' || reprocessStatus === 'skipped_unchanged';
+      const supportedFields = response.data?.supporting_document_fields || [];
       setRecoveryMessage({
         severity: processed ? 'success' : 'error',
         text: processed
-          ? 'Correction saved and the affected verification, policy, and routing stages were reprocessed. You do not need to click Run Workflow again. The value remains marked as manually entered, not independently verified.'
+          ? `Correction saved and the affected verification, policy, and routing stages were reprocessed. You do not need to click Run Workflow again.${supportedFields.includes(editField.field_name) ? ' The selected supporting document gives this value high demo confidence; it is still not external verification.' : ' The value remains marked as manually entered and may require review.'}`
           : `Correction was saved, but reprocessing did not complete: ${response.data?.reprocessing?.error || reprocessStatus || 'unknown failure'}. Retry processing or send the case to manual review.`,
       });
       await refreshCasePanels(Number(caseId));
@@ -621,9 +622,9 @@ const CaseDetailPage: React.FC = () => {
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>EyeVen Form Alignment</Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                If a value is missing because OCR could not read it, enter it with the field's Edit button. If the vendor has not provided the information, create a follow-up email draft below. After the vendor replies, enter the received value here and save to reprocess verification, policy, and routing.
-              </Typography>
+              <Alert severity="info" sx={{ mb: 2 }}>
+                EyeVen classifies unresolved values from document review and OCR confidence. When reviewed documents are readable but an in-scope value is not found, the workflow creates a vendor follow-up email draft; you can also enter or correct the value using Edit. When OCR confidence is low or the evidence is uncertain, EyeVen does not treat the value as missing from the vendor—the PIC should enter or correct it using Edit. After a vendor reply, enter the received value here and save to reprocess verification, policy, and routing.
+              </Alert>
               <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
                 <Chip label={`${populated} Populated`} color="success" size="small" />
                 <Chip label={`${missing} Missing`} color="default" size="small" />

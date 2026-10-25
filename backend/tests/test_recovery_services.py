@@ -98,7 +98,11 @@ class RecoveryServiceTests(unittest.TestCase):
             patch(
                 "app.services.case_service.UploadedFile",
                 new=SimpleNamespace(query=SimpleNamespace(
-                    filter_by=Mock(return_value=SimpleNamespace(first=Mock(return_value=object())))
+                    filter_by=Mock(return_value=SimpleNamespace(first=Mock(
+                        return_value=SimpleNamespace(
+                            source_category="supporting_document"
+                        )
+                    )))
                 )),
             ),
             patch("app.services.case_service.db.session.commit"),
@@ -122,6 +126,60 @@ class RecoveryServiceTests(unittest.TestCase):
             "contact_email": "vendor@example.com",
         }))
         self.assertEqual(field.status, "low_confidence")
+
+    def test_correction_with_selected_supporting_document_gets_demo_high_confidence(self):
+        field = SimpleNamespace(
+            field_name="latest_annual_revenue_range",
+            value_text=None,
+            normalized_value_text=None,
+            value_source="unknown",
+            status="missing",
+            confidence_score=None,
+            source_file_id=None,
+            source_excerpt=None,
+            notes=None,
+        )
+        with (
+            patch(
+                "app.services.case_service.VendorCase",
+                new=SimpleNamespace(query=SimpleNamespace(get_or_404=Mock())),
+            ),
+            patch(
+                "app.services.case_service.EyeVenFormFieldValue",
+                new=SimpleNamespace(query=SimpleNamespace(filter_by=Mock(
+                    return_value=SimpleNamespace(all=Mock(return_value=[field]))
+                ))),
+            ),
+            patch(
+                "app.services.case_service.UploadedFile",
+                new=SimpleNamespace(query=SimpleNamespace(filter_by=Mock(
+                    return_value=SimpleNamespace(first=Mock(
+                        return_value=SimpleNamespace(
+                            source_category="supporting_document"
+                        )
+                    ))
+                ))),
+            ),
+            patch("app.services.case_service.db.session.commit"),
+            patch(
+                "app.services.case_service.ReprocessingOrchestrator.reprocess",
+                return_value={"status": "completed"},
+            ),
+        ):
+            result = CaseService.correct_fields(31, [{
+                "field_name": "latest_annual_revenue_range",
+                "value_text": "RM500k-RM5m",
+                "source_file_id": 42,
+            }])
+
+        self.assertEqual(field.value_source, "supporting_document")
+        self.assertEqual(field.status, "filled_from_supporting_docs")
+        self.assertEqual(field.confidence_score, 0.9)
+        self.assertEqual(field.source_file_id, 42)
+        self.assertEqual(
+            result["supporting_document_fields"],
+            ["latest_annual_revenue_range"],
+        )
 
     def test_correction_cannot_claim_source_confirmation_without_a_document(self):
         field = SimpleNamespace(field_name="contact_email")

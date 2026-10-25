@@ -343,6 +343,34 @@ class SafetyGateTests(unittest.TestCase):
         self.assertTrue(result["allowed"])
         self.assertEqual(result["suggested_decision"], "complete_verified")
 
+    def test_supporting_document_corrected_value_is_not_blocked_by_manual_note(self):
+        fields = complete_fields()
+        revenue = next(
+            item for item in fields
+            if item.field_name == "latest_annual_revenue_range"
+        )
+        revenue.status = "filled_from_supporting_docs"
+        revenue.value_source = "supporting_document"
+        revenue.confidence_score = 0.9
+        revenue.source_file_id = 42
+        revenue.notes = (
+            "PIC manual correction; not independently verified. "
+            "Demo mode: high confidence assigned because a supporting document "
+            "was selected for this value."
+        )
+
+        result = SafetyGate.evaluate_results(verification(), policy(), fields)
+
+        self.assertTrue(result["allowed"])
+        self.assertNotIn(
+            "latest_annual_revenue_range:manual_correction_not_independently_verified",
+            result["review_blockers"],
+        )
+        self.assertNotIn(
+            "latest_annual_revenue_range:low_confidence",
+            result["review_blockers"],
+        )
+
 
     def test_blank_signature_and_chop_are_optional(self):
         fields = complete_fields()
