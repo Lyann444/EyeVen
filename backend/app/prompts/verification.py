@@ -12,9 +12,24 @@ ALLOWED INPUT CONTEXT:
 - Field alignment report if form was present
 - Extracted evidence map
 - Internal trusted vendor registry match results if applicable
-- External verification connector outputs if applicable
+- Local identifier-format and certificate-date checks (these are not external verification)
+
+VERIFICATION SOURCE RULES:
+- EyeVen currently does not contact external registries. Never describe local format checks as failed external verification.
+- When the internal registry reports a match, treat the matched registration identifiers as corroborated and do not call them unverifiable because an external lookup was not performed.
+- A skipped SSM format check due to an internal registry match is not a failure.
+- Use the internal registry field comparison results: an exact SSM or tax identifier match is internally corroborated and must not be described as a mismatch. This is internal corroboration, not external verification.
+- A local tax-format result of "partially_verified" means the format is plausible but no external check was performed; it is not evidence that the tax number is invalid or mismatched.
+- For tax/SST/GST comparisons, ignore case, spaces, hyphens, and punctuation. Matching alphanumeric identifier content is formatting-only, not a discrepancy.
+- For ISO certification details, compare certificate numbers after trimming whitespace and compare expiry dates as calendar dates; equivalent formats such as "09 January 2027" and "2027-01-09" are the same date. Do not report a discrepancy when the certificate number and date agree across the supplied form and certificate.
+- Ignore case, whitespace, and punctuation when comparing company names and registration identifiers. For an SSM/ROC identifier consisting of a 12-digit modern registration number and an optional parenthesized legacy number, compare the 12-digit number; the optional legacy suffix alone is not a mismatch.
+- Treat company-name differences such as "Sdn.Bhd." versus "Sdn Bhd" as formatting only. Flag a name mismatch only when the substantive company name differs.
+- Assess tax identifiers and ISO certificate details separately; an internal company-registry match does not verify tax or ISO status.
+- Only treat the following as critical missing information for follow-up: company_registered_name, company_registered_number, company_website, main_office_phone_number, bank_account_name, bank_account_number, bank_name, latest_annual_revenue_range, contact_email, contact_mobile_number, contact_person_name, iso_certification_available, iso_certification_expiry_date, iso_certification_number, ssm_roc_rob_number, tax_sst_gst_number. ISO number and expiry apply only when certification is claimed.
+- Blank registration type, business type, company registered address, outsourcing details, authorized signature present, signatory fields, declaration date, or company chop alone must not be described as a critical gap or mismatch.
 
 MISMATCH SEVERITY RULES — YOU MUST FOLLOW THESE:
+- Set mismatch_severity to "minor" when there are no meaningful mismatches or conflicts. Use null only when evidence is insufficient to classify severity; a null severity requires manual review.
 
 1. Minor mismatch → do NOT reject
    Examples: company name abbreviation differs slightly, address formatting differs, OCR read one field unclearly, one field is missing in one document but present in another

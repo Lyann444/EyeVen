@@ -43,3 +43,16 @@ def mark_case_reviewed(case_id):
         return jsonify(result), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 404
+
+
+@case_bp.route("/<int:case_id>/fields", methods=["PATCH"])
+def correct_case_fields(case_id):
+    data = request.get_json(silent=True)
+    if not data or "fields" not in data:
+        return jsonify({"error": "A JSON body containing fields is required"}), 400
+    try:
+        return jsonify(CaseService.correct_fields(case_id, data["fields"])), 200
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    except Exception as error:
+        return jsonify({"error": str(error)}), 500

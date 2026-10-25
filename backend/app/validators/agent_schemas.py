@@ -473,6 +473,7 @@ NEXT_ACTION_SCHEMA = {
             "enum": [
                 "targeted_verification",
                 "reprocess_stage",
+                "request_pic_upload",
                 "request_information",
                 "manual_review",
                 "finish",
@@ -491,6 +492,7 @@ NEXT_ACTION_SCHEMA = {
                 "form_structuring",
                 "verification",
                 "policy_evaluation",
+                "routing",
                 None,
             ],
         },

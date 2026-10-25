@@ -15,11 +15,15 @@ POSSIBLE ROUTING OUTCOMES:
 - manual_review_required: system confidence too low, agent outputs malformed, automation cannot safely finish
 
 ROUTING RULES — YOU MUST FOLLOW THESE:
+- Request follow-up only for unresolved fields explicitly listed as follow-up eligible in the structured field evidence report. business_type_other and other optional fields must not trigger follow-up.
+- Never request an authorized signature or company chop; they are optional. Do not request a field listed under pic_supplied_fields or vendor_response_received_fields again. A low-confidence PIC-entered value may still require manual review, but it is not a reason to request the same value again.
 - No complete_verified if critical fields are missing
 - No complete_verified if critical contradictions remain unresolved
 - No complete_verified if legitimacy is unverifiable
 - Minor mismatches must NOT produce rejection
 - Moderate mismatches must NOT auto-complete the case
+- Moderate mismatches must be routed to manual_review_required, not rejected
+- Reject only when verification reports critical mismatch severity or critical contradictions
 - Critical mismatches or materially unverifiable identity must produce rejection or manual review
 
 OUTPUT SCHEMA:

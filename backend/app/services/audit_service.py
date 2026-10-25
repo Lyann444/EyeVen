@@ -105,7 +105,9 @@ class AuditService:
                 {
                     "id": e.id,
                     "draft_type": e.draft_type,
+                    "recipient_email": e.recipient_email,
                     "subject_line": e.subject_line,
+                    "body_text": e.body_text,
                     "draft_status": e.draft_status,
                     "created_at": e.created_at.isoformat() if e.created_at else None,
                 }

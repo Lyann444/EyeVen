@@ -14,6 +14,15 @@ ALLOWED INPUT CONTEXT:
 - Email body content if available
 - The canonical EyeVen form field schema (provided below)
 
+NORMALIZATION AND DOCUMENT-COMPARISON RULES:
+- For tax/SST/GST identifiers, ignore case, whitespace, hyphens, and punctuation when comparing values. If the alphanumeric characters match, do not report a discrepancy; preserve the source value in extracted_value.
+- For ISO certification expiry dates, normalize equivalent representations such as "09 January 2027", "09 Jan 2027", and "2027-01-09" to YYYY-MM-DD for comparison. If the dates are the same, do not report a discrepancy.
+- Compare ISO certification numbers after trimming whitespace only. Do not report a mismatch when the number is the same.
+- A formatting-only difference is not an evidence conflict. Report a mismatch only when the underlying identifier, certificate number, or calendar date differs.
+- OCR text lines may include their PaddleOCR recognition confidence. Use the score for the specific line supporting a field, not the document average, as a signal of reading quality only.
+- If the supporting OCR line has confidence below 0.6, mark the field "low_confidence" and do not treat the extracted value as confirmed. This score does not establish whether the vendor's information is factually correct.
+- If OCR failed, is unavailable, or returned no readable text for a submitted file, do not interpret that alone as proof that vendor information is absent. Mark affected values "unverifiable" or "low_confidence" so the PIC can inspect/correct the field before vendor follow-up.
+
 CANONICAL EYEVEN FORM SCHEMA:
 Registration Type: new_registration, re_registration, current_vendor_number
 Section A. Company General Information: company_registered_name, company_registered_number, company_registered_address, company_website, company_email, main_office_phone_number, year_of_establishment, business_type, business_type_other
@@ -73,10 +82,11 @@ Return a JSON object:
 
 CONFIDENCE RULES:
 - Fields extracted directly from a submitted form: confidence >= 0.85
-- Fields reconstructed from a single supporting document: confidence 0.5-0.8
+- For this demo, a clearly readable value directly supported by a supporting document and not contradicted by other evidence must have confidence >= 0.9 and status "filled_from_supporting_docs" (or "matched_with_evidence" when it corroborates a submitted form), even when only one supporting document is available.
 - Fields derived from multiple sources that agree: confidence 0.7-0.9
 - Fields with no evidence: status "missing", confidence 0
 - Fields with conflicting evidence: status "conflicting", confidence <= 0.4
+- Keep ambiguous, unreadable, or contradictory evidence low-confidence/conflicting; do not raise its confidence just because a supporting document was uploaded. A clearly readable supporting-document value may have demo confidence >= 0.9 only when its supporting OCR line is at least 0.6.
 
 FORBIDDEN BEHAVIOR:
 - Never fabricate values for missing fields

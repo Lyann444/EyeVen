@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 
 from app.extensions import db
 from app.models import EyeVenFormFieldValue, VendorCase
@@ -37,6 +38,26 @@ MOCK_REGISTRY = [
         "contact_person_name": "Siti Aminah",
         "business_type": "Sdn Bhd",
     },
+    {
+        "vendor_number": "V-10004",
+        "company_registered_name": "Apex Office Supplies Sdn Bhd",
+        "company_registered_number": "201901045678 (1355008-X)",
+        "ssm_roc_rob_number": "201901045678 (1355008-X)",
+        "tax_sst_gst_number": "B16-1808-32001114",
+        "company_email": "sales@apexoffice.com.my",
+        "contact_person_name": "Nur Aisyah Rahman",
+        "business_type": "Private Limited",
+    },
+    {
+        "vendor_number": "V-10005",
+        "company_registered_name": "GOLDEN SCREEN CINEMAS SDN BHD",
+        "company_registered_number": "201901025328 (1323008-X)",
+        "ssm_roc_rob_number": "201901025328 (1323008-X)",
+        "tax_sst_gst_number": "B16-1808-32001114",
+        "company_email": "sales@gscoffice.com.my",
+        "contact_person_name": "Nur Arisah Rahman",
+        "business_type": "Private Limited",
+    },
 ]
 
 
@@ -50,6 +71,7 @@ class InternalRegistryService:
             ("ssm_roc_rob_number", "ssm_roc_rob_number"),
             ("company_registered_name", "company_registered_name"),
             ("company_registered_number", "company_registered_number"),
+            ("tax_sst_gst_number", "tax_sst_gst_number"),
         ]
         if target_fields is not None:
             supported_fields = {
@@ -94,7 +116,14 @@ class InternalRegistryService:
                         "registry_value": registry_value,
                         "match": "not_provided",
                     })
-                elif submitted == registry_value.lower():
+                elif (
+                    InternalRegistryService._normalize_field_value(
+                        field_name, submitted
+                    )
+                    == InternalRegistryService._normalize_field_value(
+                        field_name, registry_value
+                    )
+                ):
                     score += 1
                     field_results.append({
                         "field_name": field_name,
@@ -102,7 +131,14 @@ class InternalRegistryService:
                         "registry_value": registry_value,
                         "match": "exact",
                     })
-                elif InternalRegistryService._fuzzy_match(submitted, registry_value.lower()):
+                elif InternalRegistryService._fuzzy_match(
+                    InternalRegistryService._normalize_field_value(
+                        field_name, submitted
+                    ),
+                    InternalRegistryService._normalize_field_value(
+                        field_name, registry_value
+                    ),
+                ):
                     score += 0.5
                     field_results.append({
                         "field_name": field_name,
@@ -160,6 +196,25 @@ class InternalRegistryService:
             result["registry_record"] = None
 
         return result
+
+    @staticmethod
+    def _normalize_for_comparison(value):
+        return " ".join(re.findall(r"[a-z0-9]+", value.casefold()))
+
+    @staticmethod
+    def _normalize_field_value(field_name, value):
+        if field_name in {
+            "company_registered_number",
+            "ssm_roc_rob_number",
+        }:
+            primary_registration_number = re.fullmatch(
+                r"\s*(\d{12})(?:\s*\(\s*[a-z0-9-]+\s*\))?\s*",
+                value,
+                re.IGNORECASE,
+            )
+            if primary_registration_number:
+                return primary_registration_number.group(1)
+        return InternalRegistryService._normalize_for_comparison(value)
 
     @staticmethod
     def _fuzzy_match(a, b):

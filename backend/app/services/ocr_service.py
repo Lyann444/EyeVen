@@ -4,8 +4,37 @@ import os
 logger = logging.getLogger(__name__)
 
 OCR_SUPPORTED_EXTENSIONS = {"pdf", "png", "jpg", "jpeg", "tiff", "bmp", "gif"}
+LOW_CONFIDENCE_THRESHOLD = 0.6
 
 _ocr_engine = None
+
+
+def _confidence_summary(text_blocks):
+    confidences = [
+        float(block["confidence"])
+        for block in text_blocks
+        if isinstance(block.get("confidence"), (int, float))
+    ]
+    if not confidences:
+        return {
+            "average_confidence": None,
+            "minimum_confidence": None,
+            "low_confidence_block_count": 0,
+            "quality_status": "unreadable" if not text_blocks else "unscored",
+        }
+
+    return {
+        "average_confidence": round(sum(confidences) / len(confidences), 4),
+        "minimum_confidence": round(min(confidences), 4),
+        "low_confidence_block_count": sum(
+            confidence < LOW_CONFIDENCE_THRESHOLD for confidence in confidences
+        ),
+        "quality_status": (
+            "low_confidence"
+            if any(confidence < LOW_CONFIDENCE_THRESHOLD for confidence in confidences)
+            else "readable"
+        ),
+    }
 
 
 def _get_ocr_engine(lang="en"):
@@ -22,6 +51,8 @@ def _get_ocr_engine(lang="en"):
 
 
 class OcrService:
+    LOW_CONFIDENCE_THRESHOLD = LOW_CONFIDENCE_THRESHOLD
+
     @staticmethod
     def run_ocr(file_path, lang="en"):
         ext = os.path.splitext(file_path)[1].lstrip(".").lower()
@@ -32,6 +63,7 @@ class OcrService:
                 "full_text": "",
                 "page_count": 0,
                 "status": "skipped_unsupported_format",
+                **_confidence_summary([]),
             }
 
         engine = _get_ocr_engine(lang)
@@ -42,6 +74,7 @@ class OcrService:
                 "full_text": "",
                 "page_count": 0,
                 "status": "ocr_unavailable",
+                **_confidence_summary([]),
             }
 
         try:
@@ -57,6 +90,7 @@ class OcrService:
                 "full_text": "",
                 "page_count": 0,
                 "status": f"ocr_error: {e}",
+                **_confidence_summary([]),
             }
 
     @staticmethod
@@ -83,6 +117,7 @@ class OcrService:
             "full_text": full_text,
             "page_count": 1,
             "status": "completed",
+            **_confidence_summary(text_blocks),
         }
 
     @staticmethod
@@ -119,4 +154,5 @@ class OcrService:
             "full_text": full_text,
             "page_count": len(images),
             "status": "completed",
+            **_confidence_summary(all_blocks),
         }

@@ -20,6 +20,7 @@ def field(
         value_text=value,
         normalized_value_text=normalized,
         value_source=source,
+        notes=None,
         source_file_id=source_file_id,
         source_excerpt=excerpt,
         confidence_score=confidence,
@@ -107,8 +108,49 @@ class RoutingFieldEvidenceTests(unittest.TestCase):
             {
                 "field_status_counts": {},
                 "unresolved_field_count": 0,
+                "pic_supplied_fields": [],
+                "vendor_response_received_fields": [],
                 "unresolved_fields": [],
             },
+        )
+
+    def test_optional_unresolved_fields_are_omitted_from_routing_evidence(self):
+        result = ContextAssembler._routing_field_evidence([
+            field("business_type", "missing"),
+            field("outsourcing_details", "conflicting", "hidden"),
+            field("contact_mobile_number", "missing"),
+        ])
+
+        self.assertEqual(result["unresolved_field_count"], 1)
+        self.assertEqual(
+            result["unresolved_fields"][0]["field_name"],
+            "contact_mobile_number",
+        )
+
+    def test_vendor_response_is_reported_without_remaining_unresolved(self):
+        response = field("latest_annual_revenue_range", "low_confidence", "RM1M-5M")
+        response.notes = (
+            "Vendor response received and transcribed by PIC."
+        )
+
+        result = ContextAssembler._routing_field_evidence([response])
+
+        self.assertEqual(result["unresolved_field_count"], 0)
+        self.assertEqual(
+            result["vendor_response_received_fields"],
+            ["latest_annual_revenue_range"],
+        )
+
+    def test_manual_revenue_correction_is_not_reported_as_follow_up(self):
+        revenue = field("latest_annual_revenue_range", "low_confidence", "50-100k")
+        revenue.notes = "PIC manual correction; not independently verified."
+
+        result = ContextAssembler._routing_field_evidence([revenue])
+
+        self.assertEqual(result["unresolved_field_count"], 0)
+        self.assertEqual(
+            result["pic_supplied_fields"],
+            ["latest_annual_revenue_range"],
         )
 
 

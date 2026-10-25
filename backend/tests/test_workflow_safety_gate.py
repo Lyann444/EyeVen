@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.orchestrators.workflow_orchestrator import WorkflowOrchestrator
@@ -156,6 +157,33 @@ class WorkflowSafetyGateTests(unittest.TestCase):
             ),
         )
         evaluate.assert_not_called()
+
+    def test_rejection_with_moderate_verification_is_routed_to_manual_review(self):
+        decision, reasoning, action = (
+            WorkflowOrchestrator._prevent_rejection_for_noncritical_mismatch(
+                "rejected",
+                "Moderate registration mismatch.",
+                "Reject vendor",
+                SimpleNamespace(mismatch_severity="moderate"),
+            )
+        )
+
+        self.assertEqual(decision, "manual_review_required")
+        self.assertIn("severity is moderate, not critical", reasoning)
+        self.assertEqual(action, "Escalate for human review")
+
+    def test_critical_verification_can_remain_rejected(self):
+        result = WorkflowOrchestrator._prevent_rejection_for_noncritical_mismatch(
+            "rejected",
+            "Critical contradiction.",
+            "Reject vendor",
+            SimpleNamespace(mismatch_severity="critical"),
+        )
+
+        self.assertEqual(
+            result,
+            ("rejected", "Critical contradiction.", "Reject vendor"),
+        )
 
     @patch("app.orchestrators.workflow_orchestrator.SafetyGate.evaluate")
     def test_blocked_approval_with_high_risk_routes_to_review_action(self, evaluate):

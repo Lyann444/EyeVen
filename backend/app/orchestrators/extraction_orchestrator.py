@@ -120,6 +120,17 @@ class ExtractionOrchestrator:
                 "full_text": ocr_result.get("full_text", ""),
                 "page_count": ocr_result.get("page_count", 0),
                 "text_block_count": len(ocr_result.get("text_blocks", [])),
+                "ocr_quality": {
+                    "average_confidence": ocr_result.get("average_confidence"),
+                    "minimum_confidence": ocr_result.get("minimum_confidence"),
+                    "low_confidence_block_count": ocr_result.get(
+                        "low_confidence_block_count", 0
+                    ),
+                    "quality_status": ocr_result.get(
+                        "quality_status",
+                        "unreadable" if not ocr_result.get("full_text") else "unscored",
+                    ),
+                },
             }
 
         return {

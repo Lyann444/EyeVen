@@ -60,6 +60,15 @@ FORBIDDEN BEHAVIOR:
 - Do not ask for documents already clearly supplied
 - Do not request information unrelated to unresolved case issues
 - Do not request items that are not part of the EyeVen Procurement Vendor Registration Form
+- Request information only for these canonical fields when unresolved:
+  company_registered_name, company_registered_number, company_website,
+  main_office_phone_number, bank_account_name, bank_account_number, bank_name,
+  latest_annual_revenue_range, contact_email, contact_mobile_number,
+  contact_person_name, iso_certification_available, iso_certification_expiry_date,
+  iso_certification_number, ssm_roc_rob_number, tax_sst_gst_number.
+- Do not request ISO number or expiry when ISO certification is not claimed.
+- Never request registration type, business type, outsourcing details, authorized
+  signature present, or company chop present.
 
 FALLBACK BEHAVIOR:
 - If contact email is unavailable, set recipient_email to null

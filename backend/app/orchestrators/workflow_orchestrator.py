@@ -15,12 +15,13 @@ from app.models import (
     PolicyEvaluationRun,
     RoutingDecision,
     EmailDraft,
+    UploadedFile,
 )
 from app.orchestrators.extraction_orchestrator import ExtractionOrchestrator
 from app.services.form_service import FormService
 from app.services.glm_service import GlmService, GlmServiceError
 from app.services.context_assembler import ContextAssembler
-from app.services.safety_gate import SafetyGate
+from app.services.safety_gate import FOLLOW_UP_FIELDS, SafetyGate
 from app.services.action_executor import ActionExecutor, ActionExecutorError
 from app.services.next_action_planner import (
     NextActionPlanner,
@@ -31,6 +32,7 @@ from app.prompts.policy_evaluation import POLICY_EVALUATION_PROMPT
 from app.prompts.routing import ROUTING_PROMPT
 from app.prompts.follow_up import FOLLOW_UP_PROMPT
 from app.validators.agent_schemas import (
+    CANONICAL_FIELD_NAMES,
     VERIFICATION_SCHEMA,
     POLICY_EVALUATION_SCHEMA,
     ROUTING_SCHEMA,
@@ -54,6 +56,25 @@ class WorkflowOrchestrator:
                 "current_state": case.current_state,
                 "stopping_reason": "terminal_case",
             }
+
+        if not UploadedFile.query.filter_by(vendor_case_id=case_id).first():
+            result = {
+                "case_id": case_id,
+                "current_state": case.current_state,
+                "stages_run": [],
+                "results": {},
+                "trace": [],
+            }
+            if include_agentic:
+                agentic_trace, stopping_reason = WorkflowOrchestrator._run_agentic_loop(
+                    case_id
+                )
+                result["agentic_trace"] = agentic_trace
+                result["stopping_reason"] = stopping_reason
+                result["current_state"] = VendorCase.query.get(case_id).current_state
+            else:
+                result["stopping_reason"] = "awaiting_documents"
+            return result
 
         results = {}
         trace = []
@@ -140,18 +161,6 @@ class WorkflowOrchestrator:
                 started_at=stage_started_at, started_clock=stage_started_clock,
             ))
 
-        if case.current_state == "pending_follow_up":
-            state_before = case.current_state
-            stage_started_at = datetime.utcnow()
-            stage_started_clock = time.perf_counter()
-            follow_up_result = WorkflowOrchestrator._run_follow_up(case_id)
-            results["follow_up"] = follow_up_result
-            case = VendorCase.query.get(case_id)
-            trace.append(WorkflowOrchestrator._trace_stage(
-                case_id, "follow_up", state_before, case.current_state, follow_up_result,
-                started_at=stage_started_at, started_clock=stage_started_clock,
-            ))
-
         result = {
             "case_id": case_id,
             "current_state": case.current_state,
@@ -227,9 +236,13 @@ class WorkflowOrchestrator:
             started_clock = time.perf_counter()
             try:
                 before = NextActionPlanner.case_snapshot(case_id, attempted_actions)
-                plan = NextActionPlanner.plan(
-                    case_id, attempted_actions, snapshot=before
+                plan = WorkflowOrchestrator._registry_recovery_plan(
+                    attempted_actions, before
                 )
+                if plan is None:
+                    plan = NextActionPlanner.plan(
+                        case_id, attempted_actions, snapshot=before
+                    )
             except (GlmServiceError, NextActionPlannerError) as error:
                 logger.error("Next-action planner failed for case %d: %s", case_id, error)
                 WorkflowOrchestrator._route_to_manual_review(case_id)
@@ -388,6 +401,18 @@ class WorkflowOrchestrator:
                 "result": safe_execution,
             })
 
+            if plan["action"] == "request_information" and execution.get("status") in {
+                "completed", "already_available"
+            }:
+                stopping_reason = "follow_up_created"
+                break
+            if (
+                plan["action"] == "request_pic_upload"
+                and execution.get("status") == "awaiting_pic_upload"
+            ):
+                stopping_reason = "awaiting_pic_upload"
+                break
+
             if plan["action"] == "manual_review":
                 stopping_reason = "manual_review_required"
                 break
@@ -430,10 +455,66 @@ class WorkflowOrchestrator:
         return action_trace, stopping_reason
 
     @staticmethod
+    def _registry_recovery_plan(prior_actions, snapshot):
+        if not prior_actions:
+            return None
+
+        last_action = prior_actions[-1]
+        result = last_action.get("result")
+        if (
+            last_action.get("action") != "targeted_verification"
+            or not isinstance(result, dict)
+            or result.get("match_status") not in {"mismatched", "no_match"}
+        ):
+            return None
+
+        unresolved_registration_fields = set(
+            result.get("unresolved_fields", [])
+        )
+        unresolved_follow_up_candidates = {
+            item.get("field_name"): item.get("availability")
+            for item in snapshot.get("follow_up_candidates", [])
+            if isinstance(item, dict)
+        }
+        if (
+            unresolved_registration_fields
+            & {
+                field_name
+                for field_name, availability in unresolved_follow_up_candidates.items()
+                if availability == "not_found_in_reviewed_documents"
+            }
+            and snapshot.get("follow_up_draft_count", 0) == 0
+        ):
+            return {
+                "action": "request_information",
+                "reason": (
+                    "The internal registry did not corroborate a submitted "
+                    "registration identifier; request clarification."
+                ),
+                "target_fields": [],
+                "target_stage": None,
+            }
+
+        return {
+            "action": "manual_review",
+            "reason": (
+                "The internal registry did not corroborate a submitted "
+                "registration identifier and automated follow-up is unavailable."
+            ),
+            "target_fields": [],
+            "target_stage": None,
+        }
+
+    @staticmethod
     def _snapshot_fingerprint(snapshot):
         return json.dumps({
             "current_state": snapshot["current_state"],
             "fields": snapshot["fields"],
+            "available_evidence": snapshot.get("available_evidence", []),
+            "case_evidence_assessment": snapshot.get("case_evidence_assessment", {}),
+            "unchanged_successful_stages": snapshot.get(
+                "unchanged_successful_stages", []
+            ),
             "verification": snapshot["verification"],
             "policy": snapshot["policy"],
             "routing_decision": snapshot["routing_decision"],
@@ -448,8 +529,10 @@ class WorkflowOrchestrator:
             "match_status",
             "matched_vendor_number",
             "target_fields",
+            "unresolved_fields",
             "external_verification_performed",
             "stage",
+            "result_changed",
             "downstream_stages",
             "current_state",
             "email_draft_id",
@@ -464,6 +547,31 @@ class WorkflowOrchestrator:
     @staticmethod
     def _summarize_extraction_result(result):
         extraction_results = result.get("extraction_results", [])
+        ocr_warnings = [
+            {
+                "file_id": item.get("file_id"),
+                "status": item.get("status", "unknown"),
+                "quality_status": item.get("ocr_quality", {}).get(
+                    "quality_status", "unknown"
+                ),
+                "average_confidence": item.get("ocr_quality", {}).get(
+                    "average_confidence"
+                ),
+                "minimum_confidence": item.get("ocr_quality", {}).get(
+                    "minimum_confidence"
+                ),
+                "low_confidence_block_count": item.get("ocr_quality", {}).get(
+                    "low_confidence_block_count", 0
+                ),
+            }
+            for item in extraction_results
+            if item.get("extraction_method") == "paddleocr"
+            and (
+                item.get("status") != "completed"
+                or item.get("ocr_quality", {}).get("quality_status")
+                in {"low_confidence", "unreadable"}
+            )
+        ]
         failures = [
             {
                 "file_id": item.get("file_id"),
@@ -471,6 +579,7 @@ class WorkflowOrchestrator:
             }
             for item in extraction_results
             if item.get("status") != "completed"
+            and item.get("extraction_method") != "paddleocr"
         ]
         return {
             "status": "failed" if failures else "completed",
@@ -478,6 +587,7 @@ class WorkflowOrchestrator:
             "files_processed": result.get("files_processed", 0),
             "zip_files_extracted": result.get("zip_files_extracted", 0),
             "failures": failures,
+            "ocr_warnings": ocr_warnings,
         }
 
     @staticmethod
@@ -487,7 +597,14 @@ class WorkflowOrchestrator:
             "low_confidence", "declaration_missing",
             "mismatched_with_evidence",
         }
-        if any(field["status"] in unresolved_statuses for field in snapshot["fields"]):
+        if any(
+            field.get(
+                "follow_up_eligible",
+                field.get("field_name") in FOLLOW_UP_FIELDS,
+            )
+            and field["status"] in unresolved_statuses
+            for field in snapshot["fields"]
+        ):
             return True
         policy = snapshot["policy"]
         if policy and (
@@ -591,11 +708,15 @@ class WorkflowOrchestrator:
             db.session.commit()
             return {"status": "glm_failed", "error": str(e)}
 
+        mismatch_severity = WorkflowOrchestrator._normalized_verification_severity(
+            glm_result
+        )
+
         run = VerificationRun(
             vendor_case_id=case_id,
             run_status="completed",
             legitimacy_status=glm_result.get("legitimacy_status"),
-            mismatch_severity=glm_result.get("mismatch_severity"),
+            mismatch_severity=mismatch_severity,
             summary=glm_result.get("summary"),
             key_findings=json.dumps(glm_result.get("critical_conflicts", [])),
             confidence_score=glm_result.get("confidence"),
@@ -609,10 +730,32 @@ class WorkflowOrchestrator:
 
         return {
             "legitimacy_status": glm_result.get("legitimacy_status"),
-            "mismatch_severity": glm_result.get("mismatch_severity"),
+            "mismatch_severity": mismatch_severity,
             "confidence": glm_result.get("confidence"),
             "summary": glm_result.get("summary"),
         }
+
+    @staticmethod
+    def _normalized_verification_severity(glm_result):
+        mismatch_severity = glm_result.get("mismatch_severity")
+        mismatch_lists = (
+            "critical_conflicts",
+            "minor_mismatches",
+            "moderate_mismatches",
+            "critical_mismatches",
+        )
+        if (
+            mismatch_severity is None
+            and glm_result.get("legitimacy_status")
+            in {"verified", "verified_with_minor_gaps"}
+            and all(
+                isinstance(glm_result.get(key), list)
+                and not glm_result[key]
+                for key in mismatch_lists
+            )
+        ):
+            return "minor"
+        return mismatch_severity
 
     @staticmethod
     def _run_policy_evaluation(case_id):
@@ -634,6 +777,13 @@ class WorkflowOrchestrator:
             case.current_state = "manual_review_required"
             db.session.commit()
             return {"status": "glm_failed", "error": str(e)}
+
+        fields = EyeVenFormFieldValue.query.filter_by(
+            vendor_case_id=case_id
+        ).all()
+        glm_result = WorkflowOrchestrator._normalize_policy_result(
+            glm_result, fields, case.registration_type
+        )
 
         latest_verification = VerificationRun.query.filter_by(
             vendor_case_id=case_id
@@ -663,6 +813,99 @@ class WorkflowOrchestrator:
             "recoverable_issue_count": glm_result.get("recoverable_issue_count"),
             "policy_confidence": glm_result.get("policy_confidence"),
         }
+
+    @staticmethod
+    def _normalize_policy_result(result, fields, registration_type):
+        field_values = {
+            field.field_name: (
+                getattr(field, "normalized_value_text", None)
+                or getattr(field, "value_text", None)
+                or ""
+            ).strip().casefold()
+            for field in fields
+        }
+        optional_fields = set(CANONICAL_FIELD_NAMES) - FOLLOW_UP_FIELDS
+        outsourcing_declared = field_values.get(
+            "outsource_any_part_of_services", ""
+        ) in SafetyGate.AFFIRMATIVE_VALUES
+        if field_values.get("iso_certification_available", "") not in SafetyGate.AFFIRMATIVE_VALUES:
+            optional_fields.update({
+                "iso_certification_number",
+                "iso_certification_expiry_date",
+            })
+
+        def normalized_name(value):
+            return str(value).casefold().replace("_", " ")
+
+        def is_optional_issue(item):
+            if isinstance(item, dict):
+                field_name = str(item.get("field_name") or "").casefold()
+                category = str(item.get("flag_type") or "").casefold()
+                description = str(item.get("description") or "").casefold()
+                text = " ".join(
+                    normalized_name(part)
+                    for part in (field_name, category, description)
+                )
+            else:
+                text = normalized_name(item)
+
+            if (
+                not outsourcing_declared
+                and "outsourcing_risk_flag" in text
+            ):
+                return True
+            if any(
+                normalized_name(field_name) in text
+                for field_name in pic_supplied_fields
+            ):
+                return True
+            return any(
+                normalized_name(field_name) in text
+                for field_name in optional_fields
+            )
+
+        pic_supplied_fields = {
+            field.field_name
+            for field in fields
+            if SafetyGate.has_pic_supplied_value(field)
+        }
+        normalized = dict(result)
+        removed_optional_issue = False
+        for key in ("risk_flags", "blocking_issues", "recoverable_issues"):
+            items = result.get(key, [])
+            if not isinstance(items, list):
+                continue
+            retained = []
+            for item in items:
+                if is_optional_issue(item):
+                    removed_optional_issue = True
+                else:
+                    retained.append(item)
+            normalized[key] = retained
+
+        risk_flags = normalized.get("risk_flags", [])
+        blocking_flag_count = sum(
+            1 for flag in risk_flags
+            if isinstance(flag, dict) and flag.get("severity") == "blocking"
+        )
+        recoverable_flag_count = sum(
+            1 for flag in risk_flags
+            if isinstance(flag, dict) and flag.get("severity") == "recoverable"
+        )
+        normalized["blocking_issue_count"] = max(
+            len(normalized.get("blocking_issues", [])), blocking_flag_count
+        )
+        normalized["recoverable_issue_count"] = max(
+            len(normalized.get("recoverable_issues", [])), recoverable_flag_count
+        )
+
+        if (
+            removed_optional_issue
+            and normalized["blocking_issue_count"] == 0
+            and result.get("risk_band") in {"high", "critical"}
+        ):
+            normalized["risk_band"] = "medium"
+        return normalized
 
     @staticmethod
     def _apply_safety_gate(
@@ -775,6 +1018,12 @@ class WorkflowOrchestrator:
         decision_evidence = WorkflowOrchestrator._normalize_decision_evidence(
             glm_result.get("decision_evidence", [])
         )
+        latest_verification = VerificationRun.query.filter_by(
+            vendor_case_id=case_id
+        ).order_by(VerificationRun.created_at.desc()).first()
+        latest_policy = PolicyEvaluationRun.query.filter_by(
+            vendor_case_id=case_id
+        ).order_by(PolicyEvaluationRun.created_at.desc()).first()
 
         # The LLM may recommend approval, but deterministic Python rules
         # can veto it before the decision is persisted.
@@ -790,13 +1039,27 @@ class WorkflowOrchestrator:
             recommended_action,
             glm_result.get("confidence"),
         )
-
-        latest_verification = VerificationRun.query.filter_by(
-            vendor_case_id=case_id
-        ).order_by(VerificationRun.created_at.desc()).first()
-        latest_policy = PolicyEvaluationRun.query.filter_by(
-            vendor_case_id=case_id
-        ).order_by(PolicyEvaluationRun.created_at.desc()).first()
+        (
+            decision_code,
+            decision_reasoning,
+            recommended_action,
+        ) = WorkflowOrchestrator._prevent_rejection_for_noncritical_mismatch(
+            decision_code,
+            decision_reasoning,
+            recommended_action,
+            latest_verification,
+        )
+        (
+            decision_code,
+            decision_reasoning,
+            recommended_action,
+        ) = WorkflowOrchestrator._enforce_follow_up_eligibility(
+            case_id,
+            decision_code,
+            decision_reasoning,
+            recommended_action,
+            glm_result.get("confidence"),
+        )
 
         decision = RoutingDecision(
             vendor_case_id=case_id,
@@ -841,6 +1104,63 @@ class WorkflowOrchestrator:
             "safety_gate": safety_gate_result,
             "decision_evidence": decision_evidence,
         }
+
+    @staticmethod
+    def _enforce_follow_up_eligibility(
+        case_id, decision_code, decision_reasoning, recommended_action, confidence
+    ):
+        if decision_code != "follow_up_required":
+            return decision_code, decision_reasoning, recommended_action
+
+        fields = EyeVenFormFieldValue.query.filter_by(
+            vendor_case_id=case_id
+        ).all()
+        field_values = {
+            field.field_name: SafetyGate._field_value(field)
+            for field in fields
+        }
+        if any(
+            SafetyGate.is_follow_up_needed(field, field_values)
+            for field in fields
+        ):
+            return decision_code, decision_reasoning, recommended_action
+
+        gated_decision, gated_reasoning, gated_action, _ = (
+            WorkflowOrchestrator._apply_safety_gate(
+                case_id,
+                "complete_verified",
+                (
+                    decision_reasoning
+                    + " | Follow-up removed because no unresolved eligible "
+                    "fields remain."
+                ).strip(" |"),
+                "Proceed with vendor onboarding",
+                confidence,
+            )
+        )
+        return gated_decision, gated_reasoning, gated_action
+
+    @staticmethod
+    def _prevent_rejection_for_noncritical_mismatch(
+        decision_code, decision_reasoning, recommended_action, verification
+    ):
+        if (
+            decision_code == "rejected"
+            and verification is not None
+            and verification.mismatch_severity != "critical"
+        ):
+            severity = verification.mismatch_severity or "unknown"
+            decision_reasoning = (
+                decision_reasoning
+                + " | Rejection changed to manual review because verification "
+                + f"severity is {severity}, not critical."
+            ).strip(" |")
+            return (
+                "manual_review_required",
+                decision_reasoning,
+                "Escalate for human review",
+            )
+        return decision_code, decision_reasoning, recommended_action
 
     @staticmethod
     def _run_follow_up(case_id):

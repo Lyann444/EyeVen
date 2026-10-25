@@ -1,5 +1,6 @@
 import logging
 import re
+from datetime import datetime
 
 from app.models import EyeVenFormFieldValue
 
@@ -8,13 +9,27 @@ logger = logging.getLogger(__name__)
 
 class ExternalVerificationService:
     @staticmethod
-    def verify_identifiers(case_id):
+    def verify_identifiers(case_id, internal_registry_match=None):
         fields = EyeVenFormFieldValue.query.filter_by(vendor_case_id=case_id).all()
         field_map = {f.field_name: f.value_text or "" for f in fields}
 
+        registry_matched = (
+            isinstance(internal_registry_match, dict)
+            and internal_registry_match.get("match_status") == "matched"
+        )
         results = {
-            "ssm_verification": ExternalVerificationService._verify_ssm(
-                field_map.get("ssm_roc_rob_number", "")
+            "ssm_verification": (
+                {
+                    "status": "skipped",
+                    "detail": (
+                        "SSM format check skipped because the internal registry "
+                        "matched; no external registry was contacted"
+                    ),
+                }
+                if registry_matched
+                else ExternalVerificationService._verify_ssm(
+                    field_map.get("ssm_roc_rob_number", "")
+                )
             ),
             "tax_verification": ExternalVerificationService._verify_tax(
                 field_map.get("tax_sst_gst_number", "")
@@ -29,7 +44,15 @@ class ExternalVerificationService:
         ssm_status = results["ssm_verification"]["status"]
         tax_status = results["tax_verification"]["status"]
 
-        if ssm_status == "verified" and tax_status == "verified":
+        if registry_matched:
+            overall = (
+                "partially_verified"
+                if tax_status in ("verified", "partially_verified")
+                else "unverifiable"
+                if tax_status == "failed"
+                else "partially_verified"
+            )
+        elif ssm_status == "verified" and tax_status == "verified":
             overall = "verified"
         elif ssm_status in ("verified", "partially_verified") and tax_status in ("verified", "partially_verified"):
             overall = "partially_verified"
@@ -40,6 +63,8 @@ class ExternalVerificationService:
 
         return {
             "overall_status": overall,
+            "verification_source": "local_format_checks_only",
+            "external_registry_contacted": False,
             "checks": results,
         }
 
@@ -47,6 +72,20 @@ class ExternalVerificationService:
     def _verify_ssm(ssm_number):
         if not ssm_number:
             return {"status": "not_provided", "detail": "SSM/ROC/ROB number not submitted"}
+
+        legacy_registration = re.fullmatch(
+            r"(\d{12})\s*\(([A-Za-z0-9-]{1,20})\)",
+            ssm_number.strip(),
+        )
+        if legacy_registration:
+            return {
+                "status": "partially_verified",
+                "detail": (
+                    "SSM number format appears valid with a legacy registration "
+                    "number; registry verification was not performed"
+                ),
+                "verified_value": legacy_registration.group(1),
+            }
 
         cleaned = re.sub(r"[\s\-]", "", ssm_number)
 
@@ -128,12 +167,11 @@ class ExternalVerificationService:
             issues.append("ISO certification number format appears invalid")
 
         if iso_expiry:
-            from datetime import datetime
-            try:
-                expiry_date = datetime.strptime(iso_expiry.strip(), "%Y-%m-%d")
+            expiry_date = ExternalVerificationService._parse_iso_expiry(iso_expiry)
+            if expiry_date is not None:
                 if expiry_date < datetime.utcnow():
                     issues.append(f"ISO certificate expired on {iso_expiry}")
-            except ValueError:
+            else:
                 issues.append(f"ISO expiry date format unreadable: {iso_expiry}")
         elif iso_available.lower() in ("yes", "true", "y") and iso_number:
             issues.append("ISO expiry date not provided for claimed certification")
@@ -144,3 +182,12 @@ class ExternalVerificationService:
             return {"status": "failed", "detail": "; ".join(issues)}
         else:
             return {"status": "partially_verified", "detail": "; ".join(issues)}
+
+    @staticmethod
+    def _parse_iso_expiry(value):
+        for date_format in ("%Y-%m-%d", "%d %B %Y", "%d %b %Y"):
+            try:
+                return datetime.strptime(value.strip(), date_format)
+            except ValueError:
+                continue
+        return None

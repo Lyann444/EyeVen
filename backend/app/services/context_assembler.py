@@ -10,6 +10,7 @@ from app.models import (
 )
 from app.services.internal_registry_service import InternalRegistryService
 from app.services.external_verification_service import ExternalVerificationService
+from app.services.safety_gate import FOLLOW_UP_FIELDS, SafetyGate
 
 
 class ContextAssembler:
@@ -31,8 +32,19 @@ class ContextAssembler:
         """
         status_counts = {}
         unresolved_fields = []
+        pic_supplied_fields = []
+        vendor_responses = []
 
         for field in fields:
+            if field.field_name not in FOLLOW_UP_FIELDS:
+                continue
+            if SafetyGate.has_pic_supplied_value(field):
+                pic_supplied_fields.append(field.field_name)
+            if SafetyGate.has_vendor_response(field):
+                vendor_responses.append(field.field_name)
+                continue
+            if SafetyGate.has_pic_supplied_value(field):
+                continue
             status = field.status or "unknown"
             status_counts[status] = status_counts.get(status, 0) + 1
             if status in ContextAssembler.ROUTING_REVIEW_STATUSES:
@@ -56,6 +68,8 @@ class ContextAssembler:
         return {
             "field_status_counts": status_counts,
             "unresolved_field_count": len(unresolved_fields),
+            "pic_supplied_fields": sorted(pic_supplied_fields),
+            "vendor_response_received_fields": sorted(vendor_responses),
             "unresolved_fields": sorted(
                 unresolved_fields, key=lambda item: item["field_name"]
             ),
@@ -131,6 +145,7 @@ class ContextAssembler:
                 "value_text": fv.value_text,
                 "normalized_value_text": fv.normalized_value_text,
                 "status": fv.status,
+                "follow_up_eligible": fv.field_name in FOLLOW_UP_FIELDS,
                 "value_source": fv.value_source,
                 "confidence_score": float(fv.confidence_score) if fv.confidence_score else None,
                 "source_excerpt": fv.source_excerpt,
@@ -147,29 +162,74 @@ class ContextAssembler:
             "mismatches": [
                 {"field_name": m.field_name, "status": m.status}
                 for m in mismatches
+                if m.field_name in FOLLOW_UP_FIELDS
             ],
         }, indent=2)
+        internal_registry = InternalRegistryService.match_vendor(case_id)
+        format_checks = ExternalVerificationService.verify_identifiers(
+            case_id, internal_registry_match=internal_registry
+        )
 
         return {
             "form_fields": form_fields,
             "alignment_report": alignment_report,
-            "internal_registry": json.dumps(InternalRegistryService.match_vendor(case_id), indent=2),
-            "external_verification": json.dumps(ExternalVerificationService.verify_identifiers(case_id), indent=2),
+            "internal_registry": json.dumps(internal_registry, indent=2),
+            "external_verification": json.dumps(format_checks, indent=2),
         }
 
     @staticmethod
     def policy_evaluation(case_id: int) -> dict:
         fields = EyeVenFormFieldValue.query.filter_by(vendor_case_id=case_id).all()
+        field_values = {
+            field.field_name: SafetyGate._field_value(field)
+            for field in fields
+        }
+        follow_up_fields = [
+            field for field in fields
+            if field.field_name in FOLLOW_UP_FIELDS
+            and (
+                field.field_name not in {
+                    "iso_certification_number",
+                    "iso_certification_expiry_date",
+                }
+                or field_values.get("iso_certification_available", "")
+                in SafetyGate.AFFIRMATIVE_VALUES
+            )
+        ]
         latest_verification = VerificationRun.query.filter_by(
             vendor_case_id=case_id
         ).order_by(VerificationRun.created_at.desc()).first()
 
         completeness = {
-            "total_fields": len(fields),
-            "populated_fields": sum(1 for f in fields if f.value_text),
-            "missing_fields": sum(1 for f in fields if f.status == "missing"),
-            "conflicting_fields": sum(1 for f in fields if f.status == "conflicting"),
-            "low_confidence_fields": sum(1 for f in fields if f.status == "low_confidence"),
+            "total_fields": len(follow_up_fields),
+            "populated_fields": sum(
+                1 for field in follow_up_fields if field_values.get(field.field_name)
+            ),
+            "missing_fields": sum(
+                1 for field in follow_up_fields
+                if not SafetyGate.has_pic_supplied_value(field)
+                and (field.status == "missing" or not field_values.get(field.field_name))
+            ),
+            "conflicting_fields": sum(
+                1 for field in follow_up_fields
+                if not SafetyGate.has_pic_supplied_value(field)
+                and field.status == "conflicting"
+            ),
+            "low_confidence_fields": sum(
+                1 for field in follow_up_fields
+                if not SafetyGate.has_pic_supplied_value(field)
+                and field.status == "low_confidence"
+            ),
+            "vendor_response_received_fields": sorted(
+                field.field_name for field in follow_up_fields
+                if SafetyGate.has_vendor_response(field)
+            ),
+            "pic_supplied_fields": sorted(
+                field.field_name for field in follow_up_fields
+                if SafetyGate.has_pic_supplied_value(field)
+                and not SafetyGate.has_vendor_response(field)
+            ),
+            "follow_up_scope_only": True,
         }
         completeness["completeness_percentage"] = (
             round(completeness["populated_fields"] / max(completeness["total_fields"], 1) * 100, 1)
@@ -182,6 +242,8 @@ class ContextAssembler:
                     "field_name": fv.field_name,
                     "value_text": fv.value_text,
                     "status": fv.status,
+                    "vendor_response_received": SafetyGate.has_vendor_response(fv),
+                    "pic_supplied_value": SafetyGate.has_pic_supplied_value(fv),
                 }
                 for fv in fields
             ],
@@ -212,11 +274,33 @@ class ContextAssembler:
             vendor_case_id=case_id
         ).order_by(PolicyEvaluationRun.created_at.desc()).first()
         fields = EyeVenFormFieldValue.query.filter_by(vendor_case_id=case_id).all()
+        field_values = {
+            field.field_name: SafetyGate._field_value(field)
+            for field in fields
+        }
+        follow_up_fields = [
+            field for field in fields
+            if field.field_name in FOLLOW_UP_FIELDS
+            and (
+                field.field_name not in {
+                    "iso_certification_number",
+                    "iso_certification_expiry_date",
+                }
+                or field_values.get("iso_certification_available", "")
+                in SafetyGate.AFFIRMATIVE_VALUES
+            )
+        ]
 
         completeness = {
-            "total_fields": len(fields),
-            "populated_fields": sum(1 for f in fields if f.value_text),
-            "missing_fields": sum(1 for f in fields if f.status == "missing"),
+            "total_fields": len(follow_up_fields),
+            "populated_fields": sum(
+                1 for field in follow_up_fields if field_values.get(field.field_name)
+            ),
+            "missing_fields": sum(
+                1 for field in follow_up_fields
+                if field.status == "missing" or not field_values.get(field.field_name)
+            ),
+            "follow_up_scope_only": True,
         }
 
         verification_report = "No verification run"
@@ -261,18 +345,20 @@ class ContextAssembler:
             vendor_case_id=case_id
         ).order_by(PolicyEvaluationRun.created_at.desc()).first()
 
-        unresolved = EyeVenFormFieldValue.query.filter(
-            EyeVenFormFieldValue.vendor_case_id == case_id,
-            EyeVenFormFieldValue.status.in_([
-                "missing", "conflicting", "unverifiable",
-                "low_confidence", "declaration_missing", "mismatched_with_evidence",
-            ]),
-        ).all()
+        fields = EyeVenFormFieldValue.query.filter_by(vendor_case_id=case_id).all()
+        field_values = {
+            field.field_name: SafetyGate._field_value(field)
+            for field in fields
+        }
+        unresolved = [
+            field for field in fields
+            if SafetyGate.is_follow_up_needed(field, field_values)
+        ]
 
         contact_fields = EyeVenFormFieldValue.query.filter(
             EyeVenFormFieldValue.vendor_case_id == case_id,
             EyeVenFormFieldValue.field_name.in_([
-                "contact_email", "contact_person_name", "company_email",
+                "contact_email", "contact_person_name",
             ]),
         ).all()
 

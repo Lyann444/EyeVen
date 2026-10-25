@@ -1,4 +1,6 @@
 import logging
+import hashlib
+import json
 from datetime import datetime
 
 from app.extensions import db
@@ -15,6 +17,7 @@ from app.models import (
 )
 from app.orchestrators.extraction_orchestrator import ExtractionOrchestrator
 from app.orchestrators.workflow_orchestrator import WorkflowOrchestrator
+from app.services.safety_gate import FOLLOW_UP_FIELDS, SafetyGate
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +28,21 @@ class ReprocessingOrchestrator:
         "form_structuring",
         "verification",
         "policy_evaluation",
+        "routing",
+    }
+    SUPPORTED_REASONS = {
+        "new_document_uploaded",
+        "manual_correction",
+        "new_vendor_information",
+        "stale_downstream_results",
+        "recoverable_failure",
+    }
+    DOWNSTREAM_STAGES = {
+        "extraction": ["form_structuring", "verification", "policy_evaluation", "routing"],
+        "form_structuring": ["verification", "policy_evaluation", "routing"],
+        "verification": ["policy_evaluation", "routing"],
+        "policy_evaluation": ["routing"],
+        "routing": [],
     }
 
     @staticmethod
@@ -87,35 +105,80 @@ class ReprocessingOrchestrator:
     @staticmethod
     @prevent_concurrent_case_runs
     def run_stage(case_id, target_stage):
-        if target_stage not in ReprocessingOrchestrator.SUPPORTED_STAGES:
-            raise ValueError(f"Unsupported reprocessing stage: {target_stage!r}")
+        return ReprocessingOrchestrator.reprocess(
+            case_id, target_stage, "recoverable_failure"
+        )
 
+    @staticmethod
+    @prevent_concurrent_case_runs
+    def reprocess(case_id, stage, reason):
+        if stage not in ReprocessingOrchestrator.SUPPORTED_STAGES:
+            raise ValueError(f"Unsupported reprocessing stage: {stage!r}")
+        if reason not in ReprocessingOrchestrator.SUPPORTED_REASONS:
+            raise ValueError(f"Unsupported reprocessing reason: {reason!r}")
         case = VendorCase.query.get_or_404(case_id)
+        ReprocessingOrchestrator._validate_prerequisites(case_id, stage)
+        input_fingerprint = ReprocessingOrchestrator._input_fingerprint(case_id, stage)
+        if reason != "recoverable_failure":
+            previous_success = ReprocessingRun.query.filter_by(
+                vendor_case_id=case_id,
+                run_status="completed",
+            ).order_by(ReprocessingRun.started_at.desc()).all()
+            if any(
+                ReprocessingOrchestrator._run_metadata(run).get("stage") == stage
+                and ReprocessingOrchestrator._run_metadata(run).get("input_fingerprint")
+                == input_fingerprint
+                for run in previous_success
+            ):
+                unresolved = ReprocessingOrchestrator._unresolved_issues(case_id)
+                return {
+                    "action": "reprocess_stage",
+                    "case_id": case_id,
+                    "stage": stage,
+                    "reason": reason,
+                    "status": "skipped_unchanged",
+                    "result_changed": False,
+                    "downstream_stages_invalidated": [],
+                    "downstream_stages_rerun": [],
+                    "unresolved_issues": unresolved,
+                    "requires_further_processing": bool(unresolved),
+                    "error": None,
+                }
+
         previous_state = case.current_state
         reprocessing_run = ReprocessingRun(
             vendor_case_id=case_id,
             trigger_type="manual_rerun",
-            reason_summary=f"Agentic stage reprocessing: {target_stage}",
+            reason_summary=json.dumps({
+                "stage": stage,
+                "reason": reason,
+                "input_fingerprint": input_fingerprint,
+            }),
             previous_case_state=previous_state,
             run_status="started",
         )
         db.session.add(reprocessing_run)
         case.current_state = "reprocessing"
         db.session.commit()
+        before_result = ReprocessingOrchestrator._result_fingerprint(case_id)
 
         try:
             from app.services.form_service import FormService
 
-            if target_stage == "extraction":
+            if stage == "extraction":
                 stage_result = WorkflowOrchestrator._summarize_extraction_result(
                     ExtractionOrchestrator.run(case_id)
                 )
-            elif target_stage == "form_structuring":
+            elif stage == "form_structuring":
                 stage_result = FormService.structure_form(case_id)
-            elif target_stage == "verification":
+            elif stage == "verification":
                 stage_result = WorkflowOrchestrator._run_verification(case_id)
-            else:
+            elif stage == "policy_evaluation":
                 stage_result = WorkflowOrchestrator._run_policy_evaluation(case_id)
+            else:
+                case.current_state = "routing_in_progress"
+                db.session.commit()
+                stage_result = WorkflowOrchestrator._run_routing(case_id)
 
             if stage_result.get("status") in {"failed", "glm_failed"}:
                 case = VendorCase.query.get(case_id)
@@ -128,31 +191,51 @@ class ReprocessingOrchestrator:
                     "case_id": case_id,
                     "reprocessing_run_id": reprocessing_run.id,
                     "status": "failed",
-                    "stage": target_stage,
+                    "stage": stage,
                     "new_state": case.current_state,
+                    "reason": reason,
+                    "result_changed": False,
+                    "downstream_stages_invalidated": ReprocessingOrchestrator.DOWNSTREAM_STAGES[stage],
+                    "downstream_stages_rerun": [],
+                    "unresolved_issues": ReprocessingOrchestrator._unresolved_issues(case_id),
+                    "requires_further_processing": True,
                 }
 
-            workflow_result = WorkflowOrchestrator.run(
-                case_id, include_agentic=False
+            workflow_result = (
+                {"stages_run": ["routing"]}
+                if stage == "routing"
+                else WorkflowOrchestrator.run(case_id, include_agentic=False)
             )
             case = VendorCase.query.get(case_id)
             reprocessing_run.new_case_state = case.current_state
             reprocessing_run.run_status = "completed"
             reprocessing_run.completed_at = datetime.utcnow()
             db.session.commit()
+            after_result = ReprocessingOrchestrator._result_fingerprint(case_id)
+            unresolved = ReprocessingOrchestrator._unresolved_issues(case_id)
+            downstream_rerun = workflow_result.get("stages_run", [])
             return {
+                "action": "reprocess_stage",
                 "case_id": case_id,
                 "reprocessing_run_id": reprocessing_run.id,
                 "status": "completed",
-                "stage": target_stage,
+                "stage": stage,
                 "new_state": case.current_state,
-                "downstream_stages": workflow_result.get("stages_run", []),
+                "reason": reason,
+                "result_changed": before_result != after_result,
+                "downstream_stages_invalidated": ReprocessingOrchestrator.DOWNSTREAM_STAGES[stage],
+                "downstream_stages_rerun": downstream_rerun,
+                "downstream_stages": downstream_rerun,
+                "unresolved_issues": unresolved,
+                "requires_further_processing": bool(unresolved),
+                "workflow_result": workflow_result,
+                "error": None,
             }
         except Exception as error:
             logger.exception(
                 "Stage reprocessing failed for case %d at %s",
                 case_id,
-                target_stage,
+                stage,
             )
             case = VendorCase.query.get(case_id)
             case.current_state = "manual_review_required"
@@ -164,10 +247,126 @@ class ReprocessingOrchestrator:
                 "case_id": case_id,
                 "reprocessing_run_id": reprocessing_run.id,
                 "status": "failed",
-                "stage": target_stage,
+                "stage": stage,
                 "new_state": case.current_state,
+                "reason": reason,
+                "result_changed": False,
+                "downstream_stages_invalidated": ReprocessingOrchestrator.DOWNSTREAM_STAGES[stage],
+                "downstream_stages_rerun": [],
+                "unresolved_issues": ReprocessingOrchestrator._unresolved_issues(case_id),
+                "requires_further_processing": True,
                 "error": str(error),
             }
+
+    @staticmethod
+    def _validate_prerequisites(case_id, stage):
+        fields = EyeVenFormFieldValue.query.filter_by(
+            vendor_case_id=case_id
+        ).all()
+        files = UploadedFile.query.filter_by(vendor_case_id=case_id).all()
+        verification = VerificationRun.query.filter_by(
+            vendor_case_id=case_id
+        ).order_by(VerificationRun.created_at.desc()).first()
+        policy = PolicyEvaluationRun.query.filter_by(
+            vendor_case_id=case_id
+        ).order_by(PolicyEvaluationRun.created_at.desc()).first()
+
+        if stage in {"extraction", "form_structuring"} and not files:
+            raise ValueError(f"{stage} requires at least one uploaded document")
+        if stage in {"verification", "policy_evaluation", "routing"} and not fields:
+            raise ValueError(f"{stage} requires structured form fields")
+        if stage in {"policy_evaluation", "routing"} and not verification:
+            raise ValueError(f"{stage} requires a completed verification result")
+        if stage == "routing" and not policy:
+            raise ValueError("routing requires a completed policy evaluation")
+
+    @staticmethod
+    def _run_metadata(run):
+        try:
+            metadata = json.loads(run.reason_summary or "{}")
+            return metadata if isinstance(metadata, dict) else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+
+    @staticmethod
+    def _input_fingerprint(case_id, stage):
+        fields = EyeVenFormFieldValue.query.filter_by(
+            vendor_case_id=case_id
+        ).order_by(EyeVenFormFieldValue.field_name.asc()).all()
+        files = UploadedFile.query.filter_by(
+            vendor_case_id=case_id
+        ).order_by(UploadedFile.id.asc()).all()
+        payload = {
+            "stage": stage,
+            "fields": [
+                (
+                    item.field_name,
+                    item.value_text,
+                    item.normalized_value_text,
+                    item.status,
+                    item.notes,
+                )
+                for item in fields
+            ] if stage not in {"extraction", "form_structuring"} else [],
+            "files": [
+                (item.id, item.checksum_sha256, item.upload_status)
+                for item in files
+            ] if stage in {"extraction", "form_structuring"} else [],
+        }
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
+    def _result_fingerprint(case_id):
+        fields = EyeVenFormFieldValue.query.filter_by(
+            vendor_case_id=case_id
+        ).order_by(EyeVenFormFieldValue.field_name.asc()).all()
+        verification = VerificationRun.query.filter_by(
+            vendor_case_id=case_id
+        ).order_by(VerificationRun.created_at.desc()).first()
+        policy = PolicyEvaluationRun.query.filter_by(
+            vendor_case_id=case_id
+        ).order_by(PolicyEvaluationRun.created_at.desc()).first()
+        routing = RoutingDecision.query.filter_by(
+            vendor_case_id=case_id
+        ).order_by(RoutingDecision.created_at.desc()).first()
+        payload = {
+            "fields": [
+                (item.field_name, item.value_text, item.normalized_value_text, item.status)
+                for item in fields
+            ],
+            "verification": (
+                verification.legitimacy_status,
+                verification.mismatch_severity,
+                verification.summary,
+            ) if verification else None,
+            "policy": (
+                policy.risk_band,
+                policy.blocking_issue_count,
+                policy.recoverable_issue_count,
+                policy.policy_summary,
+            ) if policy else None,
+            "routing": (
+                routing.decision_code,
+                routing.decision_reasoning_summary,
+            ) if routing else None,
+        }
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
+    def _unresolved_issues(case_id):
+        fields = EyeVenFormFieldValue.query.filter_by(
+            vendor_case_id=case_id
+        ).all()
+        values = {field.field_name: SafetyGate._field_value(field) for field in fields}
+        return [
+            field.field_name
+            for field in fields
+            if SafetyGate.is_follow_up_needed(field, values)
+        ]
 
     @staticmethod
     def _compute_diff(case_id, reprocessing_run_id):

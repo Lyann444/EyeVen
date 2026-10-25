@@ -6,6 +6,27 @@ from app.models import (
     VerificationRun,
     VendorCase,
 )
+from app.services.internal_registry_service import InternalRegistryService
+
+
+FOLLOW_UP_FIELDS = {
+    "company_registered_name",
+    "company_registered_number",
+    "company_website",
+    "main_office_phone_number",
+    "bank_account_name",
+    "bank_account_number",
+    "bank_name",
+    "latest_annual_revenue_range",
+    "contact_email",
+    "contact_mobile_number",
+    "contact_person_name",
+    "iso_certification_available",
+    "iso_certification_expiry_date",
+    "iso_certification_number",
+    "ssm_roc_rob_number",
+    "tax_sst_gst_number",
+}
 
 
 class SafetyGate:
@@ -19,22 +40,18 @@ class SafetyGate:
     REQUIRED_FIELDS = {
         "company_registered_name",
         "company_registered_number",
-        "company_registered_address",
-        "business_type",
-        "contact_person_name",
-        "contact_email",
-        "bank_name",
-        "bank_account_name",
+        "company_website",
+        "main_office_phone_number",
         "bank_account_number",
-        "main_business_activities",
-        "legal_disputes_past_5_years",
-        "outsource_any_part_of_services",
-        "authorized_signature_present",
-        "signatory_name",
-        "signatory_designation",
-        "signatory_ic_or_passport_number",
-        "declaration_date",
-        "company_chop_present",
+        "bank_account_name",
+        "bank_name",
+        "latest_annual_revenue_range",
+        "contact_email",
+        "contact_mobile_number",
+        "contact_person_name",
+        "iso_certification_available",
+        "ssm_roc_rob_number",
+        "tax_sst_gst_number",
     }
 
     # High-impact identity and payment fields need corroboration, not merely
@@ -47,19 +64,20 @@ class SafetyGate:
         "bank_account_name",
         "bank_account_number",
     }
+    BANK_FIELDS = {
+        "bank_name",
+        "bank_account_name",
+        "bank_account_number",
+    }
     ACCEPTABLE_EVIDENCE_STATUSES = {
         "matched_with_evidence",
         "filled_from_supporting_docs",
     }
 
-    # Additional fields required only when the condition applies.
+    # Certification details are requested only when the vendor claims ISO certification.
     CONDITIONAL_FIELDS = {
-        "current_vendor_number": "re_registration",
-        "business_type_other": "business_type_is_other",
         "iso_certification_number": "iso_certification_available",
         "iso_certification_expiry_date": "iso_certification_available",
-        "legal_disputes_details": "legal_disputes_past_5_years",
-        "outsourcing_details": "outsource_any_part_of_services",
     }
 
     RECOVERABLE_FIELD_STATUSES = {"missing", "declaration_missing"}
@@ -70,11 +88,25 @@ class SafetyGate:
         "mismatched_with_evidence",
     }
     AFFIRMATIVE_VALUES = {"yes", "y", "true", "1"}
-    NEGATIVE_VALUES = {"no", "n", "false", "0"}
-    AFFIRMATIVE_REQUIRED_FIELDS = {
-        "authorized_signature_present",
-        "company_chop_present",
-    }
+
+    @staticmethod
+    def has_vendor_response(field) -> bool:
+        return (
+            "Vendor response received and transcribed by PIC."
+            in (getattr(field, "notes", None) or "")
+            and bool(SafetyGate._field_value(field))
+        )
+
+    @staticmethod
+    def has_pic_supplied_value(field) -> bool:
+        notes = getattr(field, "notes", None) or ""
+        return (
+            bool(SafetyGate._field_value(field))
+            and (
+                SafetyGate.has_vendor_response(field)
+                or "PIC manual correction; not independently verified." in notes
+            )
+        )
 
     @staticmethod
     def evaluate(case_id: int) -> dict:
@@ -93,12 +125,14 @@ class SafetyGate:
         fields = EyeVenFormFieldValue.query.filter_by(
             vendor_case_id=case_id
         ).all()
+        registry_match = InternalRegistryService.match_vendor(case_id)
 
         return SafetyGate.evaluate_results(
             verification,
             policy,
             fields,
             registration_type=case.registration_type,
+            registry_match=registry_match,
         )
 
     @staticmethod
@@ -111,15 +145,36 @@ class SafetyGate:
 
     @staticmethod
     def _condition_applies(condition, values, registration_type) -> bool:
-        if condition == "re_registration":
-            return registration_type == "re_registration"
-        if condition == "business_type_is_other":
-            return values.get("business_type", "") == "other"
         return values.get(condition, "") in SafetyGate.AFFIRMATIVE_VALUES
 
     @staticmethod
+    def is_follow_up_needed(field, values=None) -> bool:
+        if field.field_name not in FOLLOW_UP_FIELDS:
+            return False
+        if SafetyGate.has_pic_supplied_value(field):
+            return False
+        values = values or {}
+        if field.field_name in {
+            "iso_certification_number",
+            "iso_certification_expiry_date",
+        } and values.get("iso_certification_available", "") not in SafetyGate.AFFIRMATIVE_VALUES:
+            return False
+        unresolved_statuses = (
+            SafetyGate.RECOVERABLE_FIELD_STATUSES
+            | SafetyGate.REVIEW_FIELD_STATUSES
+        )
+        return (
+            getattr(field, "status", None) in unresolved_statuses
+            or not SafetyGate._field_value(field)
+        )
+
+    @staticmethod
     def evaluate_results(
-        verification, policy, fields, registration_type="new_registration"
+        verification,
+        policy,
+        fields,
+        registration_type="new_registration",
+        registry_match=None,
     ) -> dict:
         """Pure rule evaluation separated from database access for unit tests."""
         reasons = []
@@ -131,6 +186,9 @@ class SafetyGate:
             name: SafetyGate._field_value(field)
             for name, field in field_by_name.items()
         }
+        registry_corroborated_fields = SafetyGate._registry_corroborated_fields(
+            registry_match
+        )
 
         if verification is None or verification.run_status != "completed":
             reasons.append("verification_result_missing_or_incomplete")
@@ -184,9 +242,6 @@ class SafetyGate:
         if not fields:
             reasons.append("no_form_field_evidence_available")
 
-        if registration_type not in ("new_registration", "re_registration"):
-            recoverable_gaps.append("registration_type")
-
         required_fields = set(SafetyGate.REQUIRED_FIELDS)
         required_fields.update(
             field_name
@@ -206,16 +261,17 @@ class SafetyGate:
             value = SafetyGate._field_value(field)
             if status in SafetyGate.RECOVERABLE_FIELD_STATUSES or not value:
                 recoverable_gaps.append(field_name)
-            elif (
-                field_name in SafetyGate.AFFIRMATIVE_REQUIRED_FIELDS
-                and value in SafetyGate.NEGATIVE_VALUES
-            ):
-                recoverable_gaps.append(field_name + ":must_be_present")
 
             if (
                 field_name in SafetyGate.EVIDENCE_REQUIRED_FIELDS
                 and value
                 and status not in SafetyGate.ACCEPTABLE_EVIDENCE_STATUSES
+                and field_name not in registry_corroborated_fields
+                and not (
+                    field_name in SafetyGate.BANK_FIELDS
+                    and isinstance(registry_match, dict)
+                    and registry_match.get("match_status") == "matched"
+                )
             ):
                 review_blockers.append(
                     field_name + ":evidence_not_corroborated:" + str(status)
@@ -224,7 +280,26 @@ class SafetyGate:
         # Known contradictions or unreliable evidence block approval even when
         # the affected field is not in the required-field list.
         for field in fields:
-            if field.status in SafetyGate.REVIEW_FIELD_STATUSES:
+            notes = getattr(field, "notes", None) or ""
+            manually_corrected = (
+                "PIC manual correction; not independently verified." in notes
+            )
+            if (
+                manually_corrected
+                and field.status not in SafetyGate.ACCEPTABLE_EVIDENCE_STATUSES
+                and field.field_name not in registry_corroborated_fields
+            ):
+                review_blockers.append(
+                    field.field_name + ":manual_correction_not_independently_verified"
+                )
+
+            if (
+                (
+                    SafetyGate.is_follow_up_needed(field, values)
+                    or SafetyGate.has_pic_supplied_value(field)
+                )
+                and field.status in SafetyGate.REVIEW_FIELD_STATUSES
+            ):
                 review_blockers.append(
                     field.field_name + ":" + str(field.status)
                 )
@@ -258,3 +333,20 @@ class SafetyGate:
             "recoverable_fields": sorted(set(recoverable_gaps)),
             "review_blockers": review_blockers,
         }
+
+    @staticmethod
+    def _registry_corroborated_fields(registry_match):
+        if not isinstance(registry_match, dict) or registry_match.get("match_status") != "matched":
+            return set()
+
+        matched_vendor_number = registry_match.get("matched_vendor_number")
+        for comparison in registry_match.get("field_comparisons", []):
+            if comparison.get("vendor_number") != matched_vendor_number:
+                continue
+            return {
+                item.get("field_name")
+                for item in comparison.get("field_results", [])
+                if item.get("match") == "exact"
+                and item.get("field_name") in SafetyGate.EVIDENCE_REQUIRED_FIELDS
+            }
+        return set()

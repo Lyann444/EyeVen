@@ -6,8 +6,12 @@ from app.models import (
     VendorCase, EyeVenFormFieldValue, UploadedFile,
     VerificationRun, PolicyEvaluationRun, RoutingDecision, EmailDraft,
 )
+from app.services.audit_service import AuditService
 from app.orchestrators.workflow_orchestrator import WorkflowOrchestrator
 from app.orchestrators.reprocessing_orchestrator import ReprocessingOrchestrator
+from app.services.safety_gate import SafetyGate
+from app.validators.agent_schemas import CANONICAL_FIELD_NAMES
+import re
 
 
 class CaseService:
@@ -57,6 +61,9 @@ class CaseService:
     @staticmethod
     def get_case_detail(case_id):
         case = VendorCase.query.get_or_404(case_id)
+        files = UploadedFile.query.filter_by(vendor_case_id=case_id).order_by(
+            UploadedFile.uploaded_at.asc()
+        ).all()
         return {
             "id": case.id,
             "case_reference": case.case_reference,
@@ -71,6 +78,17 @@ class CaseService:
             "latest_routing_decision": case.latest_routing_decision,
             "created_at": case.created_at.isoformat() if case.created_at else None,
             "updated_at": case.updated_at.isoformat() if case.updated_at else None,
+            "uploaded_files": [
+                {
+                    "id": file.id,
+                    "original_filename": file.original_filename,
+                    "file_type": file.file_type,
+                    "source_category": file.source_category,
+                    "upload_status": file.upload_status,
+                    "uploaded_at": file.uploaded_at.isoformat() if file.uploaded_at else None,
+                }
+                for file in files
+            ],
         }
 
     @staticmethod
@@ -179,8 +197,175 @@ class CaseService:
 
     @staticmethod
     def create_follow_up(case_id):
+        case = VendorCase.query.get_or_404(case_id)
+        fields = EyeVenFormFieldValue.query.filter_by(
+            vendor_case_id=case_id
+        ).all()
+        field_values = {
+            field.field_name: SafetyGate._field_value(field)
+            for field in fields
+        }
+        if not any(
+            SafetyGate.is_follow_up_needed(field, field_values)
+            for field in fields
+        ):
+            return {"status": "no_eligible_follow_up_fields"}
+
+        existing_draft = EmailDraft.query.filter_by(
+            vendor_case_id=case_id
+        ).first()
+        if existing_draft:
+            return {
+                "status": "already_available",
+                "email_draft_id": existing_draft.id,
+            }
+
         result = WorkflowOrchestrator._run_follow_up(case_id)
+        if result.get("status") == "glm_failed":
+            return result
+        if case.current_state not in {
+            "completed", "rejected", "flagged_high_risk",
+        }:
+            case.current_state = "pending_follow_up"
+            db.session.commit()
         return result
+
+    @staticmethod
+    def correct_fields(case_id, updates):
+        VendorCase.query.get_or_404(case_id)
+        if not isinstance(updates, list) or not updates:
+            raise ValueError("fields must be a non-empty array")
+
+        fields = EyeVenFormFieldValue.query.filter_by(
+            vendor_case_id=case_id
+        ).all()
+        fields_by_name = {field.field_name: field for field in fields}
+        validated = []
+        seen = set()
+        for update in updates:
+            if not isinstance(update, dict):
+                raise ValueError("Each field update must be an object")
+            field_name = update.get("field_name")
+            value = update.get("value_text")
+            if field_name not in CANONICAL_FIELD_NAMES or field_name not in fields_by_name:
+                raise ValueError(f"Unsupported case field: {field_name!r}")
+            if field_name in seen:
+                raise ValueError(f"Duplicate field update: {field_name}")
+            if not isinstance(value, str) or len(value) > 5000:
+                raise ValueError(f"{field_name} must be text no longer than 5000 characters")
+            value = value.strip()
+            if any(ord(char) < 32 and char not in "\t\n\r" for char in value):
+                raise ValueError(f"{field_name} contains unsupported control characters")
+            if field_name in {"contact_email", "company_email"} and value and not re.fullmatch(
+                r"[^@\s]+@[^@\s]+\.[^@\s]+", value
+            ):
+                raise ValueError(f"{field_name} must be a valid email address")
+            if field_name == "company_website" and value and not re.match(
+                r"^(https?://)?[A-Za-z0-9.-]+\.[A-Za-z]{2,}(/.*)?$", value
+            ):
+                raise ValueError("company_website must be a valid website address")
+            source_file_id = update.get("source_file_id")
+            confirmed = update.get("confirmed_against_source", False)
+            vendor_response = update.get("vendor_response", False)
+            if not isinstance(confirmed, bool):
+                raise ValueError("confirmed_against_source must be a boolean")
+            if not isinstance(vendor_response, bool):
+                raise ValueError("vendor_response must be a boolean")
+            if confirmed and source_file_id is None:
+                raise ValueError(
+                    "Select a supporting document before confirming its source"
+                )
+            if source_file_id is not None and (
+                not isinstance(source_file_id, int) or isinstance(source_file_id, bool)
+            ):
+                raise ValueError(f"source_file_id must be an integer: {field_name}")
+            if source_file_id is not None and not UploadedFile.query.filter_by(
+                id=source_file_id, vendor_case_id=case_id
+            ).first():
+                raise ValueError(f"Source document does not belong to this case: {field_name}")
+            validated.append((
+                field_name,
+                value,
+                source_file_id,
+                confirmed,
+                vendor_response,
+            ))
+            seen.add(field_name)
+
+        for field_name, value, source_file_id, confirmed, vendor_response in validated:
+            field = fields_by_name[field_name]
+            original = field.value_text
+            note = (
+                f"PIC manual correction; not independently verified. "
+                f"Previous extracted value: {original!r}."
+            )
+            if field.source_file_id is not None:
+                note += f" Previous source file ID: {field.source_file_id}."
+            if field.source_excerpt:
+                note += f" Previous source excerpt: {field.source_excerpt!r}."
+            if confirmed:
+                note += " PIC indicated the value was checked against the source document."
+            if vendor_response:
+                note += " Vendor response received and transcribed by PIC."
+            existing_notes = (field.notes or "").strip()
+            field.notes = f"{existing_notes}\n{note}" if existing_notes else note
+            field.value_text = value or None
+            field.normalized_value_text = value or None
+            field.value_source = "vendor_response" if vendor_response else "unknown"
+            field.status = "low_confidence" if value else "missing"
+            field.confidence_score = None
+            field.source_file_id = source_file_id
+            field.source_excerpt = None
+
+        db.session.commit()
+        result = ReprocessingOrchestrator.reprocess(
+            case_id, "verification", "manual_correction"
+        )
+        return {
+            "case_id": case_id,
+            "updated_fields": [item[0] for item in validated],
+            "manual_values_are_independently_verified": False,
+            "reprocessing": result,
+        }
+
+    @staticmethod
+    def update_follow_up_draft(case_id, draft_id, values):
+        VendorCase.query.get_or_404(case_id)
+        draft = EmailDraft.query.filter_by(
+            id=draft_id, vendor_case_id=case_id
+        ).first()
+        if not draft:
+            raise ValueError("Follow-up draft not found for this case")
+        if draft.draft_status in {"sent", "discarded"}:
+            raise ValueError("Sent or discarded drafts cannot be edited")
+        if not isinstance(values, dict):
+            raise ValueError("A JSON object is required")
+        subject = values.get("subject_line")
+        body = values.get("body_text")
+        recipient = values.get("recipient_email")
+        if not isinstance(subject, str) or not subject.strip() or len(subject) > 255:
+            raise ValueError("subject_line is required and must be at most 255 characters")
+        if not isinstance(body, str) or not body.strip():
+            raise ValueError("body_text is required")
+        if recipient is not None and (
+            not isinstance(recipient, str)
+            or (recipient and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", recipient))
+        ):
+            raise ValueError("recipient_email must be a valid email address or null")
+        draft.subject_line = subject.strip()
+        draft.body_text = body
+        draft.recipient_email = recipient
+        draft.draft_status = "reviewed"
+        db.session.commit()
+        return {
+            "case_id": case_id,
+            "email_draft_id": draft.id,
+            "draft_status": draft.draft_status,
+        }
+
+    @staticmethod
+    def reprocess_stage(case_id, stage, reason):
+        return ReprocessingOrchestrator.reprocess(case_id, stage, reason)
 
     @staticmethod
     def _seed_form_fields(case_id):

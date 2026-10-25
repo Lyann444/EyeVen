@@ -15,6 +15,7 @@ export type ValueSource =
   | 'procurement_form'
   | 'supporting_document'
   | 'derived_from_multiple_sources'
+  | 'vendor_response'
   | 'unknown';
 export type RoutingDecisionCode =
   | 'complete_verified'
@@ -43,6 +44,7 @@ export interface VendorCase {
   latest_verification_status: string | null;
   latest_policy_status: string | null;
   latest_routing_decision: string | null;
+  uploaded_files?: UploadedFile[];
   created_at: string;
   updated_at: string;
 }
@@ -72,6 +74,7 @@ export interface UploadedFile {
   source_category: 'procurement_form' | 'supporting_document' | 'zip_bundle' | 'corrected_upload';
   upload_status: string;
   uploaded_at: string;
+  file_size_bytes?: number;
 }
 
 export interface VerificationRun {

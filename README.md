@@ -41,3 +41,9 @@ docker-compose up --build
 - **Database:** MySQL
 - **Reasoning:** Z AI GLM
 - **Deployment:** Vercel (frontend), Docker (backend)
+
+## Workflow
+
+See [docs/WORKFLOW.md](docs/WORKFLOW.md) for the end-to-end case workflow,
+including the bounded agentic recovery loop, its permitted actions, safeguards,
+and follow-up/reprocessing behavior.
